@@ -384,16 +384,32 @@ function log(kind, text) {
    notify 0xFFF1 + write 0xFFF2). We probe a list of known ELM services
    and pick whichever has a notify + write characteristic.
    ===================================================================== */
-const ELM_SERVICES = [
-  0xfff0, 0xffe0, 0x18f0, 0xffb0, 0xae30, 0xbeef,
-  'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
-  '0000fff0-0000-1000-8000-00805f9b34fb',
+// Full 128-bit lowercase UUID strings: some iOS Web-BLE browsers (Bluefy) reject numeric aliases.
+const uuid16 = n => `0000${n.toString(16).padStart(4, '0')}-0000-1000-8000-00805f9b34fb`;
+const ELM_SERVICES = [uuid16(0xfff0), uuid16(0xffe0), uuid16(0x18f0), uuid16(0xffb0), uuid16(0xae30), 'e7810a71-73ae-499d-8c15-faa9aef0c3f2'];
+
+// Different ways of asking the browser for the device. Each Connect tap uses the next
+// one if the previous failed (a new tap is needed because pickers require a user gesture).
+const PICKER_MODES = [
+  { name: 'all devices', opts: () => ({ acceptAllDevices: true, optionalServices: ELM_SERVICES }) },
+  { name: 'by OBD service', opts: () => ({ filters: ELM_SERVICES.map(s => ({ services: [s] })), optionalServices: ELM_SERVICES }) },
+  { name: 'by name', opts: () => ({ filters: ['VEEPEAK', 'Veepeak', 'OBD', 'IOS-Vlink', 'V-LINK', 'vLink'].map(n => ({ namePrefix: n })), optionalServices: ELM_SERVICES }) },
+  { name: 'all devices (no service list)', opts: () => ({ acceptAllDevices: true }) },
 ];
+let pickerMode = 0;
 
 function errText(e) {
   if (!e) return 'unknown error';
   if (typeof e === 'string') return e;
   return [e.name, e.message].filter(Boolean).join(': ') || String(e) || 'unknown error';
+}
+function errDump(e) {
+  try {
+    if (e == null || typeof e !== 'object') return `${typeof e}: ${String(e)}`;
+    const o = {}; for (const k of ['name', 'message', 'code', 'stack']) if (e[k] != null) o[k] = String(e[k]).slice(0, 200);
+    for (const k of Object.keys(e)) o[k] = String(e[k]).slice(0, 200);
+    return JSON.stringify(o);
+  } catch { return String(e); }
 }
 function stepError(step, e) {
   const err = new Error(`Failed while ${step} — ${errText(e)}`);
@@ -404,10 +420,17 @@ function stepError(step, e) {
 class BleElm {
   constructor() { this.buf = ''; this.pending = null; this.chain = Promise.resolve(); this.dec = new TextDecoder(); this.enc = new TextEncoder(); }
   async open() {
-    log('in', 'Step 1/4: opening Bluetooth device picker…');
+    const mode = PICKER_MODES[pickerMode % PICKER_MODES.length];
+    log('in', `Step 1/4: opening Bluetooth device picker (method ${pickerMode % PICKER_MODES.length + 1}/${PICKER_MODES.length}: ${mode.name})…`);
     try {
-      this.device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ELM_SERVICES });
-    } catch (e) { throw stepError('choosing the device', e); }
+      this.device = await navigator.bluetooth.requestDevice(mode.opts());
+    } catch (e) {
+      log('er', 'Picker error detail: ' + errDump(e));
+      pickerMode++;
+      const err = stepError('choosing the device', e);
+      err.retry = `Tap Connect again to try method ${pickerMode % PICKER_MODES.length + 1}/${PICKER_MODES.length} (${PICKER_MODES[pickerMode % PICKER_MODES.length].name}).`;
+      throw err;
+    }
     log('in', `Step 2/4: selected "${this.device.name || '(unnamed)'}" — connecting…`);
     this.device.addEventListener('gattserverdisconnected', () => this.onDisconnect && this.onDisconnect());
     try {
@@ -710,7 +733,8 @@ async function start(adapter) {
   } catch (e) {
     log('er', errText(e));
     const msg = e && e.name === 'NotFoundError' ? 'No device chosen (picker closed or nothing found)' : ('Connection failed — ' + errText(e));
-    stopAll(msg.length > 140 ? msg.slice(0, 140) + '… (see Console tab)' : msg, 'err');
+    stopAll((msg.length > 140 ? msg.slice(0, 140) + '… (see Console tab)' : msg) + (e && e.retry ? ' — ' + e.retry : ''), 'err');
+    if (e && e.retry) log('in', e.retry);
     log('in', 'Tip: open the Console tab and tap "Copy log" to share these details.');
   }
 }
