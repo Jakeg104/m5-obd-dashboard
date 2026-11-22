@@ -328,6 +328,7 @@
     <div class="cmdline">
       <input id="cmdInput" placeholder="ATI" autocomplete="off" spellcheck="false">
       <button class="btn" id="btnSend">Send</button>
+      <button class="btn" id="btnCopyLog">Copy log</button>
       <button class="btn" id="btnClearLog">Clear</button>
     </div>
   </section>
@@ -389,17 +390,38 @@ const ELM_SERVICES = [
   '0000fff0-0000-1000-8000-00805f9b34fb',
 ];
 
+function errText(e) {
+  if (!e) return 'unknown error';
+  if (typeof e === 'string') return e;
+  return [e.name, e.message].filter(Boolean).join(': ') || String(e) || 'unknown error';
+}
+function stepError(step, e) {
+  const err = new Error(`Failed while ${step} — ${errText(e)}`);
+  err.name = (e && e.name) || 'Error';
+  return err;
+}
+
 class BleElm {
   constructor() { this.buf = ''; this.pending = null; this.chain = Promise.resolve(); this.dec = new TextDecoder(); this.enc = new TextEncoder(); }
   async open() {
-    this.device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ELM_SERVICES });
-    log('in', `Selected device: ${this.device.name || '(unnamed)'} — connecting GATT…`);
+    log('in', 'Step 1/4: opening Bluetooth device picker…');
+    try {
+      this.device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ELM_SERVICES });
+    } catch (e) { throw stepError('choosing the device', e); }
+    log('in', `Step 2/4: selected "${this.device.name || '(unnamed)'}" — connecting…`);
     this.device.addEventListener('gattserverdisconnected', () => this.onDisconnect && this.onDisconnect());
-    this.server = await this.device.gatt.connect();
+    try {
+      this.server = await this.device.gatt.connect();
+    } catch (e) { throw stepError('connecting to the adapter (is another app or device already connected to it?)', e); }
+    log('in', 'Step 3/4: connected — looking for the ELM327 serial service…');
     let notifyC = null, writeC = null;
-    for (const uuid of ELM_SERVICES) {
-      let svc; try { svc = await this.server.getPrimaryService(uuid); } catch { continue; }
-      const chars = await svc.getCharacteristics();
+    let svcs = [];
+    for (const uuid of ELM_SERVICES) { try { svcs.push(await this.server.getPrimaryService(uuid)); } catch {} }
+    if (!svcs.length) { try { svcs = await this.server.getPrimaryServices(); } catch (e) { log('er', 'getPrimaryServices: ' + errText(e)); } }
+    log('in', 'Services found: ' + (svcs.map(s => s.uuid).join(', ') || 'none'));
+    for (const svc of svcs) {
+      let chars = [];
+      try { chars = await svc.getCharacteristics(); } catch (e) { log('er', `chars of ${svc.uuid}: ${errText(e)}`); continue; }
       notifyC = writeC = null;
       for (const c of chars) {
         if (!notifyC && (c.properties.notify || c.properties.indicate)) notifyC = c;
@@ -409,7 +431,8 @@ class BleElm {
     }
     if (!notifyC || !writeC) throw new Error('Could not find an ELM327 serial service on this device. Is this the Veepeak?');
     this.rx = notifyC; this.tx = writeC;
-    await this.rx.startNotifications();
+    log('in', 'Step 4/4: subscribing to adapter replies…');
+    try { await this.rx.startNotifications(); } catch (e) { throw stepError('subscribing to adapter replies', e); }
     this.rx.addEventListener('characteristicvaluechanged', (e) => this.feed(this.dec.decode(e.target.value)));
     this.name = this.device.name || 'BLE adapter';
   }
@@ -685,9 +708,10 @@ async function start(adapter) {
     pollLoop();
     scanCodes().catch(e => log('er', e.message));
   } catch (e) {
-    log('er', e.message || String(e));
-    const msg = e.name === 'NotFoundError' ? 'No device chosen' : (e.message || 'Connection failed');
-    stopAll(msg, 'err');
+    log('er', errText(e));
+    const msg = e && e.name === 'NotFoundError' ? 'No device chosen (picker closed or nothing found)' : ('Connection failed — ' + errText(e));
+    stopAll(msg.length > 140 ? msg.slice(0, 140) + '… (see Console tab)' : msg, 'err');
+    log('in', 'Tip: open the Console tab and tap "Copy log" to share these details.');
   }
 }
 
@@ -1261,6 +1285,12 @@ async function sendManual() {
 $('btnSend').onclick = sendManual;
 $('cmdInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendManual(); });
 $('btnClearLog').onclick = () => logEl.innerHTML = '';
+$('btnCopyLog').onclick = async () => {
+  const text = `UA: ${navigator.userAgent}\n` + logEl.innerText;
+  try { await navigator.clipboard.writeText(text); $('btnCopyLog').textContent = 'Copied ✓'; }
+  catch { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); $('btnCopyLog').textContent = 'Copied ✓'; } catch {} ta.remove(); }
+  setTimeout(() => $('btnCopyLog').textContent = 'Copy log', 2000);
+};
 
 // Environment checks
 (function envCheck() {
