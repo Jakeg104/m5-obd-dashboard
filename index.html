@@ -390,13 +390,14 @@ const ELM_SERVICES = [uuid16(0xfff0), uuid16(0xffe0), uuid16(0x18f0), uuid16(0xf
 
 // Different ways of asking the browser for the device. Each Connect tap uses the next
 // one if the previous failed (a new tap is needed because pickers require a user gesture).
+const OBD_NAMES = ['VEEPEAK', 'Veepeak', 'veepeak', 'OBD', 'Obd', 'obd', 'IOS-Vlink', 'V-LINK', 'vLink', 'ELM', 'Android-Vlink', 'BLE'];
 const PICKER_MODES = [
-  { name: 'all devices', opts: () => ({ acceptAllDevices: true, optionalServices: ELM_SERVICES }) },
-  { name: 'by OBD service', opts: () => ({ filters: ELM_SERVICES.map(s => ({ services: [s] })), optionalServices: ELM_SERVICES }) },
-  { name: 'by name', opts: () => ({ filters: ['VEEPEAK', 'Veepeak', 'OBD', 'IOS-Vlink', 'V-LINK', 'vLink'].map(n => ({ namePrefix: n })), optionalServices: ELM_SERVICES }) },
-  { name: 'all devices (no service list)', opts: () => ({ acceptAllDevices: true }) },
+  { name: 'OBD adapters only', opts: () => ({ filters: [...OBD_NAMES.map(n => ({ namePrefix: n })), ...ELM_SERVICES.map(s => ({ services: [s] }))], optionalServices: ELM_SERVICES }) },
+  { name: 'by OBD service only', opts: () => ({ filters: ELM_SERVICES.map(s => ({ services: [s] })), optionalServices: ELM_SERVICES }) },
+  { name: 'ALL nearby devices', opts: () => ({ acceptAllDevices: true, optionalServices: ELM_SERVICES }) },
+  { name: 'ALL nearby devices (basic)', opts: () => ({ acceptAllDevices: true }) },
 ];
-let pickerMode = 0;
+let pickerMode = loadJSON('obd.pickerMode', 0); // remembers whichever method last worked
 
 function errText(e) {
   if (!e) return 'unknown error';
@@ -432,6 +433,7 @@ class BleElm {
       throw err;
     }
     log('in', `Step 2/4: selected "${this.device.name || '(unnamed)'}" — connecting…`);
+    saveJSON('obd.pickerMode', pickerMode % PICKER_MODES.length);
     this.device.addEventListener('gattserverdisconnected', () => this.onDisconnect && this.onDisconnect());
     try {
       this.server = await this.device.gatt.connect();
