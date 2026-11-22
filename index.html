@@ -1,0 +1,1287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08090b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="M5 OBD">
+<title>E39 M5 OBD Cluster</title>
+<style>
+  :root {
+    --bg: #08090b;
+    --panel: #121418;
+    --panel2: #181b20;
+    --line: #262a31;
+    --text: #e9eaec;
+    --muted: #8b919b;
+    --ink: #f3f3f1;          /* dial numerals (day) */
+    --ink-dim: #9a9a96;
+    --needle: #ff4a1c;
+    --amber: #ff8a1f;
+    --led-on: #ffb100;
+    --led-off: #2a2419;
+    --m1: #1c69d4;
+    --m2: #2b2c7c;
+    --m3: #e2231a;
+    --ok: #39c46b;
+    --warn: #ffb020;
+    --bad: #ff4b3e;
+    --pending: #4fa3ff;
+  }
+  body.night {
+    --ink: #ff8c1a;
+    --ink-dim: #9c5a14;
+    --text: #ffcf9a;
+    --muted: #9a6a3a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.4 "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif; }
+  button { font: inherit; }
+  .mstripe { height: 5px; background: linear-gradient(90deg, var(--m1) 0 33.3%, var(--m2) 33.3% 66.6%, var(--m3) 66.6%); }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px 16px;
+    border-bottom: 1px solid var(--line); background: #0c0d10; position: sticky; top: 0; z-index: 5; }
+  .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+  .mbadge { font-weight: 900; font-style: italic; font-size: 22px; letter-spacing: -1px; padding: 0 8px 0 6px;
+    background: linear-gradient(90deg, var(--m1) 0 33%, var(--m2) 33% 66%, var(--m3) 66%);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .brand h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  .brand small { color: var(--muted); display: block; font-size: 12px; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+  .pill.on .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .pill.busy .dot { background: var(--warn); animation: blink 1s infinite; }
+  .pill.err .dot { background: var(--bad); }
+  @keyframes blink { 50% { opacity: .3; } }
+
+  .btn { border: 1px solid var(--line); background: var(--panel2); color: var(--text); padding: 8px 14px;
+    border-radius: 8px; cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; }
+  .btn:hover:not(:disabled) { border-color: #3a404a; background: #20242b; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.primary { background: var(--m1); border-color: var(--m1); color: #fff; }
+  .btn.primary:hover:not(:disabled) { background: #2a78e4; }
+  .btn.danger { background: #3a1210; border-color: #6d1f19; color: #ffb3ab; }
+  .btn.danger:hover:not(:disabled) { background: #4d1714; }
+  .btn.sm { padding: 5px 10px; font-size: 12px; }
+  .btngroup { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  nav.tabs { display: flex; gap: 4px; padding: 10px 16px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  nav.tabs button { background: none; border: none; color: var(--muted); padding: 10px 14px; cursor: pointer;
+    border-bottom: 2px solid transparent; font-weight: 600; }
+  nav.tabs button.active { color: var(--text); border-bottom-color: var(--m1); }
+  nav.tabs .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad);
+    color: #fff; font-size: 11px; margin-left: 6px; text-align: center; }
+  nav.tabs .badge[hidden] { display: none; }
+
+  main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+  section.tab { display: none; }
+  section.tab.active { display: block; }
+
+  .banner { border: 1px solid #5a4317; background: #241b0b; color: #ffd38a; padding: 10px 14px; border-radius: 10px;
+    margin-bottom: 14px; font-size: 13px; }
+  .banner.info { border-color: #1f3d66; background: #0d1a2b; color: #a9cdfa; }
+
+  /* ---------- cluster ---------- */
+  .cluster { display: grid; grid-template-columns: 1fr minmax(220px, 280px) 1fr; gap: 12px; align-items: center;
+    background: radial-gradient(ellipse at 50% 30%, #17191d 0%, #0a0b0d 70%); border: 1px solid var(--line);
+    border-radius: 28px; padding: 18px; box-shadow: inset 0 2px 30px #000; }
+  .dial svg { width: 100%; height: auto; display: block; }
+  .dial text { font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  .ink { fill: var(--ink); }
+  .ink-stroke { stroke: var(--ink); }
+  .ink-dim { fill: var(--ink-dim); }
+  body.night .glow { filter: drop-shadow(0 0 2px rgba(255,140,26,.6)); }
+  .led { transition: fill .3s; }
+
+  .center { display: flex; flex-direction: column; gap: 10px; }
+  .lights { display: flex; justify-content: center; gap: 10px; }
+  .lamp { width: 46px; height: 32px; border-radius: 6px; background: #111316; border: 1px solid #22262c;
+    display: grid; place-items: center; transition: all .25s; }
+  .lamp svg { width: 24px; height: 24px; fill: #2c3036; transition: fill .25s; }
+  .lamp.on.amber svg { fill: #ffa31a; filter: drop-shadow(0 0 6px #ff9a00); }
+  .lamp.on.red svg { fill: #ff3b2e; filter: drop-shadow(0 0 6px #ff2a1a); }
+  .lamp.on.green svg { fill: #3fdc76; filter: drop-shadow(0 0 6px #2fcf65); }
+  .lcd { background: linear-gradient(#1a1206, #0f0b04); border: 1px solid #3a2a12; border-radius: 10px; padding: 12px 14px;
+    color: #ff9a2a; font-family: Consolas, "Courier New", monospace; text-shadow: 0 0 6px rgba(255,140,30,.55); }
+  .lcd .big { font-size: 44px; line-height: 1; text-align: center; font-weight: 700; letter-spacing: 1px; }
+  .lcd .big small { font-size: 14px; margin-left: 4px; opacity: .8; }
+  .lcd .sub { text-align: center; font-size: 15px; margin: 4px 0 8px; opacity: .9; }
+  .lcd .row { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; border-top: 1px dashed #3a2a12; }
+  .lcd .row span:first-child { opacity: .7; }
+  .rate { text-align: center; color: var(--muted); font-size: 11px; }
+
+  /* ---------- tiles ---------- */
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); margin: 22px 0 10px; font-weight: 600; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 8px; position: relative; overflow: hidden; }
+  .tile .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; display: flex; justify-content: space-between; gap: 6px; }
+  .tile .val { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .val small { font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 3px; }
+  .tile .note { font-size: 11px; color: var(--muted); min-height: 15px; }
+  .tile canvas { width: 100%; height: 30px; display: block; margin-top: 4px; }
+  .tile.ns { opacity: .38; }
+  .tile.warn .val { color: var(--warn); }
+  .tile.bad .val { color: var(--bad); }
+  .afrbar { position: relative; height: 8px; border-radius: 4px; margin: 6px 0 2px;
+    background: linear-gradient(90deg, #ff4b3e 0%, #ffb020 30%, #39c46b 50%, #4fa3ff 70%, #7a5cff 100%); opacity: .85; }
+  .afrbar i { position: absolute; top: -3px; width: 3px; height: 14px; background: #fff; border-radius: 2px; box-shadow: 0 0 4px #000; transform: translateX(-1px); transition: left .2s; }
+  .afrscale { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+  .toolbar .spacer { flex: 1; }
+
+  /* ---------- codes ---------- */
+  .grid2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .card h3 { margin: 0 0 10px; font-size: 14px; }
+  .status-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+  .stat { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; min-width: 120px; }
+  .stat b { display: block; font-size: 20px; }
+  .stat span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+  .dtc { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
+  .dtc:first-child { border-top: none; }
+  .code { font-family: Consolas, monospace; font-weight: 700; font-size: 16px; padding: 3px 8px; border-radius: 6px;
+    background: #3a2508; color: #ffb347; border: 1px solid #6b4612; }
+  .code.pending { background: #0d2238; color: #8cc4ff; border-color: #1d4a7a; }
+  .dtc .desc { font-weight: 600; }
+  .dtc .hint { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .dtc a { color: #8cc4ff; font-size: 12px; text-decoration: none; white-space: nowrap; }
+  .empty { color: var(--muted); padding: 10px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { text-align: left; padding: 6px 4px; border-top: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; border-top: none; }
+  .tag { font-size: 11px; padding: 2px 7px; border-radius: 10px; font-weight: 600; }
+  .tag.ok { background: #0f2a19; color: #6fe39a; }
+  .tag.inc { background: #2e2207; color: #ffc65c; }
+  .tag.na { background: #1b1d21; color: #6b717b; }
+  .hist { font-size: 12px; color: var(--muted); max-height: 260px; overflow: auto; }
+  .hist div { padding: 6px 0; border-top: 1px solid var(--line); }
+
+  /* ---------- console ---------- */
+  #log { background: #050607; border: 1px solid var(--line); border-radius: 10px; padding: 10px; height: 52vh; overflow: auto;
+    font: 12px/1.45 Consolas, "Courier New", monospace; white-space: pre-wrap; word-break: break-all; }
+  #log .tx { color: #8cc4ff; } #log .rx { color: #b9f5c9; } #log .er { color: #ff8b80; } #log .in { color: #8b919b; }
+  .cmdline { display: flex; gap: 8px; margin-top: 10px; }
+  .cmdline input { flex: 1; background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 8px 10px;
+    font-family: Consolas, monospace; }
+
+  dialog { background: var(--panel); color: var(--text); border: 1px solid #4a2a26; border-radius: 14px; max-width: 520px; padding: 20px; }
+  dialog::backdrop { background: rgba(0,0,0,.7); }
+  dialog h3 { margin-top: 0; color: #ffb3ab; }
+  dialog ul { padding-left: 18px; color: #c9ccd1; }
+
+  @media (max-width: 980px) {
+    .cluster { grid-template-columns: 1fr 1fr; }
+    .center { grid-column: 1 / -1; order: 3; }
+    .grid2 { grid-template-columns: 1fr; }
+  }
+  /* iPhone portrait: keep both dials side by side, compact chrome */
+  @media (max-width: 560px) {
+    .cluster { grid-template-columns: 1fr 1fr; gap: 6px; border-radius: 18px; padding: 8px; }
+    .lcd .big { font-size: 36px; }
+    header { padding: 8px 16px; position: static; }
+    .brand h1 { font-size: 13px; }
+    .brand small { display: none; }
+    header .btngroup { width: 100%; }
+    header .btngroup .btn { flex: 1; padding: 11px 8px; }
+    .tiles { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .tile .val { font-size: 22px; }
+    main { padding: 12px 16px; }
+    .toolbar .btn { flex: 1 1 45%; padding: 10px 8px; }
+  }
+  /* iPhone landscape (driving view): dials + LCD on one screen */
+  @media (max-height: 500px) and (orientation: landscape) {
+    header, nav.tabs { padding-top: 4px; padding-bottom: 4px; }
+    header { position: static; }
+    .brand small { display: none; }
+    .cluster { grid-template-columns: 1fr 200px 1fr; padding: 8px 14px; }
+    .center { grid-column: auto; order: 0; }
+    .dial svg { max-height: 74vh; }
+    .lcd .big { font-size: 30px; }
+    .lcd .row { font-size: 11px; }
+  }
+  body { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); padding-bottom: env(safe-area-inset-bottom); }
+  .btn { min-height: 40px; }
+  button, .btn { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+</style>
+</head>
+<body>
+<div class="mstripe"></div>
+<header>
+  <div class="brand">
+    <span class="mbadge">M</span>
+    <div><h1>2002 BMW M5 · E39 · S62 4.9 V8</h1><small>OBD-II via Veepeak OBDCheck BLE (ELM327)</small></div>
+  </div>
+  <span id="status" class="pill"><span class="dot"></span><span id="statusText">Disconnected</span></span>
+  <div class="btngroup">
+    <button id="btnConnect" class="btn primary">Connect</button>
+    <button id="btnDemo" class="btn">Demo mode</button>
+    <button id="btnDisconnect" class="btn" disabled>Disconnect</button>
+  </div>
+</header>
+<nav class="tabs">
+  <button data-tab="dash" class="active">Dashboard</button>
+  <button data-tab="codes">Trouble Codes <span id="codeBadge" class="badge" hidden>0</span></button>
+  <button data-tab="console">Console</button>
+</nav>
+
+<main>
+  <div id="btWarn" class="banner" hidden></div>
+
+  <!-- ================= DASHBOARD ================= -->
+  <section id="tab-dash" class="tab active">
+    <div class="cluster">
+      <div class="dial"><svg id="speedo" viewBox="0 0 400 400"></svg></div>
+      <div class="center">
+        <div class="lights">
+          <div class="lamp amber" id="lampMil" title="Check engine (MIL)">
+            <svg viewBox="0 0 24 24"><path d="M7 5h6v2h-2v1h3l2 2h2V8h2v8h-2v-2h-2v3H9l-2-2H5v2H3V9h2v2h2V8h2V7H7V5z"/></svg></div>
+          <div class="lamp red" id="lampTemp" title="Coolant over-temp">
+            <svg viewBox="0 0 24 24"><path d="M11 2h2v9.3a3.5 3.5 0 1 1-2 0V9H9V7h2V5H9V3h2V2zM3 18c2 0 2 1.5 4.5 1.5S10 18 12 18s2.5 1.5 4.5 1.5S19 18 21 18v2c-2 0-2-1.5-4.5-1.5S14 20 12 20s-2.5-1.5-4.5-1.5S5 20 3 20v-2z"/></svg></div>
+          <div class="lamp red" id="lampBatt" title="Charging voltage low">
+            <svg viewBox="0 0 24 24"><path d="M5 7h3V5h2v2h4V5h2v2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zm1 5v2h4v-2H6zm8 0v2h1.5v1.5h1V14H18v-2h-1.5v-1.5h-1V12H14z"/></svg></div>
+          <div class="lamp green" id="lampCL" title="Closed-loop fueling">
+            <svg viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 1-7.4 5H2l3.5-4L9 9H6.7A6 6 0 1 0 12 6V4z"/></svg></div>
+        </div>
+        <div class="lcd">
+          <div class="big"><span id="lcdSpeed">0</span><small id="lcdSpeedUnit">MPH</small></div>
+          <div class="sub"><span id="lcdRpm">0</span> RPM</div>
+          <div class="row"><span>COOLANT</span><span id="lcdCoolant">--</span></div>
+          <div class="row"><span>INTAKE</span><span id="lcdIat">--</span></div>
+          <div class="row"><span>AFR B1 / B2</span><span id="lcdAfr">-- / --</span></div>
+          <div class="row"><span>BATTERY</span><span id="lcdBatt">--</span></div>
+          <div class="row"><span>FUEL SYS</span><span id="lcdFuelSys">--</span></div>
+        </div>
+        <div class="rate" id="rate">—</div>
+      </div>
+      <div class="dial"><svg id="tach" viewBox="0 0 400 400"></svg></div>
+    </div>
+
+    <div class="toolbar">
+      <button class="btn sm" id="btnUnits">Units: US (mph · °F)</button>
+      <button class="btn sm" id="btnNight">Night lighting: off</button>
+      <span class="spacer"></span>
+      <button class="btn sm" id="btnRecord">● Record log</button>
+      <button class="btn sm" id="btnExport" disabled>Export CSV</button>
+    </div>
+
+    <h2>Air / Fuel</h2>
+    <div class="tiles" id="tilesAfr"></div>
+    <h2>Engine</h2>
+    <div class="tiles" id="tilesEngine"></div>
+    <h2>Temperatures &amp; Electrical</h2>
+    <div class="tiles" id="tilesTemp"></div>
+  </section>
+
+  <!-- ================= CODES ================= -->
+  <section id="tab-codes" class="tab">
+    <div class="toolbar" style="margin:0 0 14px">
+      <button class="btn primary" id="btnScan">Scan for codes</button>
+      <button class="btn" id="btnFreeze">Read freeze frame</button>
+      <button class="btn danger" id="btnClear">Clear codes &amp; re-scan</button>
+      <span class="spacer"></span>
+      <span class="pill" id="scanInfo">Not scanned yet</span>
+    </div>
+    <div class="grid2">
+      <div>
+        <div class="card">
+          <div class="status-row">
+            <div class="stat"><b id="sMil">—</b><span>Check engine light</span></div>
+            <div class="stat"><b id="sCount">—</b><span>Stored codes (ECU)</span></div>
+            <div class="stat"><b id="sPending">—</b><span>Pending codes</span></div>
+            <div class="stat"><b id="sProto">—</b><span>Protocol</span></div>
+          </div>
+          <h3>Stored codes <small style="color:var(--muted);font-weight:400">(Mode 03 — these light the MIL)</small></h3>
+          <div id="storedList"><div class="empty">Run a scan.</div></div>
+          <h3 style="margin-top:16px">Pending codes <small style="color:var(--muted);font-weight:400">(Mode 07 — seen once, not yet confirmed)</small></h3>
+          <div id="pendingList"><div class="empty">Run a scan.</div></div>
+        </div>
+        <div class="card" style="margin-top:14px">
+          <h3>Freeze frame <small style="color:var(--muted);font-weight:400">(engine snapshot when the first code set — erased by clearing)</small></h3>
+          <div id="freezeOut"><div class="empty">Not read yet. Clearing codes reads it automatically first.</div></div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <h3>Emissions readiness monitors</h3>
+          <div id="readyOut"><div class="empty">Run a scan.</div></div>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:0">After clearing, monitors reset to <span class="tag inc">Incomplete</span>.
+            They complete after a mixed drive cycle (cold start, idle, steady 45–60 mph cruise, decel). A code that comes back after clearing is a real, repeatable fault.</p>
+        </div>
+        <div class="card" style="margin-top:14px">
+          <h3>Scan history <small style="color:var(--muted);font-weight:400">(this browser only)</small></h3>
+          <div class="hist" id="histOut"><div class="empty">No scans yet.</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= CONSOLE ================= -->
+  <section id="tab-console" class="tab">
+    <div class="banner info">Raw ELM327 traffic. Blue = sent, green = received. You can type AT or OBD commands below (e.g. <code>ATRV</code>, <code>ATDPN</code>, <code>0105</code>).</div>
+    <div id="log"></div>
+    <div class="cmdline">
+      <input id="cmdInput" placeholder="ATI" autocomplete="off" spellcheck="false">
+      <button class="btn" id="btnSend">Send</button>
+      <button class="btn" id="btnClearLog">Clear</button>
+    </div>
+  </section>
+</main>
+
+<dialog id="clearDlg">
+  <h3>Clear trouble codes?</h3>
+  <p>This sends OBD Mode 04 to the DME. It will:</p>
+  <ul>
+    <li>Erase all stored and pending codes and turn off the check-engine light</li>
+    <li>Erase the freeze-frame snapshot (it will be saved to history first)</li>
+    <li>Reset all emissions readiness monitors to <b>Incomplete</b> — the car will fail an emissions/inspection test until they re-complete</li>
+  </ul>
+  <p style="color:var(--warn)">Ignition ON, engine OFF is the safest state. Clearing does not fix anything — if the fault is real the code will return.</p>
+  <div class="btngroup" style="justify-content:flex-end;margin-top:16px">
+    <button class="btn" value="cancel" id="dlgCancel">Cancel</button>
+    <button class="btn danger" value="ok" id="dlgOk">Clear codes</button>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+/* =====================================================================
+   Utilities
+   ===================================================================== */
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const hex2 = (n) => n.toString(16).toUpperCase().padStart(2, '0');
+
+const settings = loadJSON('obd.settings', { units: 'us', night: false });
+function loadJSON(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } }
+function saveJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+
+/* =====================================================================
+   Console log
+   ===================================================================== */
+const logEl = $('log');
+function log(kind, text) {
+  const line = document.createElement('div');
+  line.className = kind;
+  const t = new Date().toLocaleTimeString([], { hour12: false });
+  const arrow = kind === 'tx' ? '→ ' : kind === 'rx' ? '← ' : kind === 'er' ? '✖ ' : '· ';
+  line.textContent = `${t} ${arrow}${text}`;
+  logEl.appendChild(line);
+  while (logEl.childNodes.length > 600) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+/* =====================================================================
+   Transport 1: Bluetooth LE ELM327 (Veepeak OBDCheck BLE and clones)
+   Veepeak BLE exposes a UART-style GATT service (usually 0xFFF0, with
+   notify 0xFFF1 + write 0xFFF2). We probe a list of known ELM services
+   and pick whichever has a notify + write characteristic.
+   ===================================================================== */
+const ELM_SERVICES = [
+  0xfff0, 0xffe0, 0x18f0, 0xffb0, 0xae30, 0xbeef,
+  'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
+  '0000fff0-0000-1000-8000-00805f9b34fb',
+];
+
+class BleElm {
+  constructor() { this.buf = ''; this.pending = null; this.chain = Promise.resolve(); this.dec = new TextDecoder(); this.enc = new TextEncoder(); }
+  async open() {
+    this.device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ELM_SERVICES });
+    log('in', `Selected device: ${this.device.name || '(unnamed)'} — connecting GATT…`);
+    this.device.addEventListener('gattserverdisconnected', () => this.onDisconnect && this.onDisconnect());
+    this.server = await this.device.gatt.connect();
+    let notifyC = null, writeC = null;
+    for (const uuid of ELM_SERVICES) {
+      let svc; try { svc = await this.server.getPrimaryService(uuid); } catch { continue; }
+      const chars = await svc.getCharacteristics();
+      notifyC = writeC = null;
+      for (const c of chars) {
+        if (!notifyC && (c.properties.notify || c.properties.indicate)) notifyC = c;
+        if (!writeC && (c.properties.write || c.properties.writeWithoutResponse)) writeC = c;
+      }
+      if (notifyC && writeC) { log('in', `Using service ${svc.uuid} (rx ${notifyC.uuid.slice(4, 8)}, tx ${writeC.uuid.slice(4, 8)})`); break; }
+    }
+    if (!notifyC || !writeC) throw new Error('Could not find an ELM327 serial service on this device. Is this the Veepeak?');
+    this.rx = notifyC; this.tx = writeC;
+    await this.rx.startNotifications();
+    this.rx.addEventListener('characteristicvaluechanged', (e) => this.feed(this.dec.decode(e.target.value)));
+    this.name = this.device.name || 'BLE adapter';
+  }
+  feed(s) {
+    this.buf += s;
+    const i = this.buf.indexOf('>');
+    if (i >= 0) {
+      const out = this.buf.slice(0, i); this.buf = this.buf.slice(i + 1);
+      if (this.pending) { const p = this.pending; this.pending = null; clearTimeout(p.t); p.resolve(out); }
+    }
+  }
+  async write(str) {
+    const data = this.enc.encode(str);
+    for (let i = 0; i < data.length; i += 20) {
+      const chunk = data.slice(i, i + 20);
+      if (this.tx.properties.writeWithoutResponse) await this.tx.writeValueWithoutResponse(chunk);
+      else await this.tx.writeValue(chunk);
+    }
+  }
+  send(cmd, timeout = 3000) {
+    const run = () => new Promise((resolve, reject) => {
+      this.buf = '';
+      const t = setTimeout(() => { this.pending = null; reject(new Error('timeout waiting for ' + cmd)); }, timeout);
+      this.pending = { resolve, reject, t };
+      this.write(cmd + '\r').catch(e => { clearTimeout(t); this.pending = null; reject(e); });
+    });
+    const p = this.chain.then(run, run);
+    this.chain = p.catch(() => {});
+    return p;
+  }
+  close() { try { this.device && this.device.gatt.connected && this.device.gatt.disconnect(); } catch {} }
+}
+
+/* =====================================================================
+   Transport 2: Simulator — behaves like an ELM327 on an ISO 9141-2 car,
+   so the whole parsing pipeline is exercised without the car.
+   ===================================================================== */
+class SimElm {
+  constructor() {
+    this.name = 'Simulator';
+    this.t0 = performance.now(); this.last = this.t0;
+    this.s = { speed: 0, rpm: 780, gear: 1, thr: 0, coolant: 28, o2phase: 0 };
+    this.stored = ['0171', '0174']; this.pending = ['0302']; this.cleared = false;
+    this.supported = ['01','03','04','05','06','07','08','09','0C','0D','0E','0F','10','11','13','14','15','18','19','1C','20','21','2F','33','40','42','46'];
+    this.freeze = null;
+  }
+  step() {
+    const now = performance.now(); const dt = Math.min(0.5, (now - this.last) / 1000); this.last = now;
+    const t = ((now - this.t0) / 1000) % 34;
+    const s = this.s; const R = [0, 117, 75, 54, 41, 33, 28];
+    let brake = 0;
+    if (t < 3) s.thr = 0; else if (t < 11) s.thr = 100; else if (t < 21) s.thr = 22; else if (t < 29) { s.thr = 0; brake = 1; } else s.thr = 0;
+    let acc;
+    if (s.thr >= 90) acc = 21 - s.speed * 0.07;
+    else if (s.thr > 0) acc = (105 - s.speed) * 0.35;
+    else acc = brake ? -14 : -1.5;
+    s.speed = clamp(s.speed + acc * dt, 0, 280);
+    if (s.thr >= 90) { if (s.speed * R[s.gear] > 6900 && s.gear < 6) s.gear++; }
+    else { let g = 1; for (let i = 6; i >= 1; i--) { if (s.speed * R[i] >= 1500) { g = i; break; } } s.gear = g; }
+    const target = s.speed < 9 ? 780 + s.thr * 25 : Math.max(780, s.speed * R[s.gear]);
+    s.rpm += (target - s.rpm) * Math.min(1, dt * 6);
+    s.coolant = Math.min(91 + Math.sin(now / 9000) * 2, s.coolant + dt * 0.9);
+    s.o2phase += dt * (1.2 + s.rpm / 3000);
+  }
+  values() {
+    const s = this.s;
+    const ol = s.coolant < 45 ? 1 : (s.thr >= 90 || (s.thr === 0 && s.speed > 15)) ? 4 : 2;
+    const o2 = (bank) => {
+      if (ol === 4 && s.thr >= 90) return 0.86 + Math.random() * 0.03;
+      if (ol === 4) return 0.04 + Math.random() * 0.03;
+      if (ol === 1) return 0.75;
+      const ph = Math.sin(s.o2phase * Math.PI + bank * 1.3);
+      return ph > 0 ? 0.72 + ph * 0.12 : 0.12 + (1 + ph) * 0.05;
+    };
+    return {
+      '03': [ol, 0], '04': [Math.round((22 + s.thr * 0.75) * 2.55)], '05': [Math.round(s.coolant + 40)],
+      '06': [128 + Math.round(Math.sin(s.o2phase * 3.1) * 4)], '07': [140], '08': [128 + Math.round(Math.cos(s.o2phase * 2.7) * 4)], '09': [141],
+      '0C': (() => { const v = Math.round(s.rpm * 4); return [v >> 8, v & 255]; })(),
+      '0D': [Math.round(s.speed)], '0E': [Math.round((14 + (s.thr > 50 ? 12 : 22) - s.rpm / 1000) * 2 + 128)],
+      '0F': [38 + 40], '10': (() => { const v = Math.round((s.rpm / 1000) * (4 + s.thr * 0.55) * 100); return [v >> 8, v & 255]; })(),
+      '11': [Math.round(s.thr * 2.55 * 0.82 + 30)], '13': [0x33],
+      '14': [Math.round(o2(0) * 200), 128], '15': [Math.round(0.68 * 200), 255],
+      '18': [Math.round(o2(1) * 200), 128], '19': [Math.round(0.66 * 200), 255], '1C': [1],
+      '2F': [158], '33': [101], '42': (() => { const v = 14080 + Math.round(Math.random() * 60); return [v >> 8, v & 255]; })(), '46': [27 + 40],
+    };
+  }
+  bitmap(base) {
+    let bits = 0;
+    for (const p of this.supported) { const n = parseInt(p, 16) - base; if (n >= 1 && n <= 32) bits |= (1 << (32 - n)) >>> 0; }
+    return (bits >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  }
+  async send(cmd) {
+    log('tx', cmd);
+    await sleep(35 + Math.random() * 45);
+    this.step();
+    const c = cmd.toUpperCase().replace(/\s+/g, '');
+    let r;
+    if (c === 'ATZ') r = 'ELM327 v1.5';
+    else if (c === 'ATI') r = 'ELM327 v1.5';
+    else if (c === 'ATRV') r = (13.9 + Math.random() * 0.3).toFixed(1) + 'V';
+    else if (c === 'ATDPN') r = 'A3';
+    else if (c === 'ATDP') r = 'AUTO, ISO 9141-2';
+    else if (c.startsWith('AT')) r = 'OK';
+    else if (c === '0100' || c === '0120' || c === '0140') r = '41' + c.slice(2) + this.bitmap(parseInt(c.slice(2), 16));
+    else if (c === '0101') {
+      const A = (this.stored.length ? 0x80 : 0) | this.stored.length;
+      r = '4101' + hex2(A) + '07' + '6D' + (this.cleared ? '6D' : '00');
+    }
+    else if (c === '03') r = this.stored.length ? this.dtcFrames('43', this.stored) : '43000000000000';
+    else if (c === '07') r = this.pending.length ? this.dtcFrames('47', this.pending) : '47000000000000';
+    else if (c === '04') { this.freeze = null; this.stored = []; this.pending = []; this.cleared = true; r = '44';
+      setTimeout(() => { if (this.cleared) this.pending = ['0174']; }, 20000); }
+    else if (c.startsWith('02') && c.length === 6) {
+      const pid = c.slice(2, 4);
+      if (!this.stored.length) r = 'NO DATA';
+      else {
+        if (!this.freeze) { this.freeze = this.values(); this.freeze['0C'] = [0x0C, 0x80]; this.freeze['0D'] = [0]; this.freeze['05'] = [0x8A]; }
+        if (pid === '02') r = '420200' + this.stored[0];
+        else if (this.freeze[pid]) r = '42' + pid + '00' + this.freeze[pid].map(hex2).join('');
+        else r = 'NO DATA';
+      }
+    }
+    else if (c.startsWith('01') && c.length === 4) {
+      const v = this.values()[c.slice(2)];
+      r = v ? '41' + c.slice(2) + v.map(hex2).join('') : 'NO DATA';
+    }
+    else r = '?';
+    log('rx', r);
+    return r + '\r\r';
+  }
+  dtcFrames(head, codes) {
+    const out = []; const list = codes.slice();
+    while (list.length) { const g = list.splice(0, 3); while (g.length < 3) g.push('0000'); out.push(head + g.join('')); }
+    return out.join('\r');
+  }
+  close() {}
+}
+
+/* =====================================================================
+   OBD-II layer (shared by both transports)
+   ===================================================================== */
+const PROTOCOLS = { '1': 'SAE J1850 PWM', '2': 'SAE J1850 VPW', '3': 'ISO 9141-2', '4': 'ISO 14230 KWP (5-baud)', '5': 'ISO 14230 KWP (fast)',
+  '6': 'CAN 11-bit 500k', '7': 'CAN 29-bit 500k', '8': 'CAN 11-bit 250k', '9': 'CAN 29-bit 250k', 'A': 'SAE J1939', 'B': 'User CAN 1', 'C': 'User CAN 2' };
+
+const obd = { adapter: null, connected: false, protocol: null, isCAN: false, supported: new Set(), o2map: {}, fails: {} };
+
+async function cmd(c, timeout) {
+  if (!(obd.adapter instanceof SimElm)) log('tx', c);
+  const raw = await obd.adapter.send(c, timeout);
+  const lines = raw.split(/[\r\n]+/).map(s => s.trim()).filter(s => s && s !== c && !/^SEARCHING/i.test(s) && !/^BUS INIT/i.test(s));
+  if (!(obd.adapter instanceof SimElm)) log('rx', lines.join(' | ') || '(empty)');
+  return lines;
+}
+const ERR_RE = /^(NO DATA|UNABLE TO CONNECT|CAN ERROR|BUS ERROR|BUFFER FULL|STOPPED|ERROR|\?|FB ERROR|DATA ERROR|ACT ALERT|LV RESET)/i;
+
+/* Request a Mode 01/02 PID; returns data bytes after the header, or null */
+async function readPid(mode, pid, frame = '') {
+  const want = hex2(parseInt(mode, 16) + 0x40) + pid;
+  const lines = await cmd(mode + pid + frame);
+  for (let ln of lines) {
+    ln = ln.replace(/\s+/g, '').replace(/^\d:/, '').toUpperCase();
+    if (ERR_RE.test(ln)) return null;
+    const i = ln.indexOf(want);
+    if (i >= 0) {
+      let rest = ln.slice(i + want.length);
+      if (frame) rest = rest.slice(frame.length);
+      const bytes = []; for (let k = 0; k + 1 < rest.length; k += 2) bytes.push(parseInt(rest.slice(k, k + 2), 16));
+      return bytes;
+    }
+  }
+  return null;
+}
+
+async function detectSupported() {
+  obd.supported.clear();
+  for (const base of ['00', '20', '40', '60']) {
+    if (base !== '00' && !obd.supported.has(base)) break;
+    const b = await readPid('01', base);
+    if (!b || b.length < 4) break;
+    const bits = ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0;
+    for (let n = 1; n <= 32; n++) if (bits & ((1 << (32 - n)) >>> 0)) obd.supported.add(hex2(parseInt(base, 16) + n));
+  }
+  // Which O2 sensor layout does the DME report?
+  const SNS13 = ['B1S1','B1S2','B1S3','B1S4','B2S1','B2S2','B2S3','B2S4'];
+  const SNS1D = ['B1S1','B1S2','B2S1','B2S2','B3S1','B3S2','B4S1','B4S2'];
+  const layout = obd.supported.has('1D') && !obd.supported.has('13') ? SNS1D : SNS13;
+  obd.o2map = {};
+  for (let i = 0; i < 8; i++) {
+    obd.o2map[hex2(0x14 + i)] = layout[i];
+    obd.o2map[hex2(0x24 + i)] = layout[i];
+  }
+}
+
+/* PID decoders: bytes -> values in metric base units */
+const DEC = {
+  '03': b => ({ fuelsys: b[0] }),
+  '04': b => ({ load: b[0] * 100 / 255 }),
+  '05': b => ({ coolant: b[0] - 40 }),
+  '06': b => ({ stft1: (b[0] - 128) * 100 / 128 }),
+  '07': b => ({ ltft1: (b[0] - 128) * 100 / 128 }),
+  '08': b => ({ stft2: (b[0] - 128) * 100 / 128 }),
+  '09': b => ({ ltft2: (b[0] - 128) * 100 / 128 }),
+  '0B': b => ({ map: b[0] }),
+  '0C': b => ({ rpm: (b[0] * 256 + b[1]) / 4 }),
+  '0D': b => ({ speed: b[0] }),
+  '0E': b => ({ timing: b[0] / 2 - 64 }),
+  '0F': b => ({ iat: b[0] - 40 }),
+  '10': b => ({ maf: (b[0] * 256 + b[1]) / 100 }),
+  '11': b => ({ throttle: b[0] * 100 / 255 }),
+  '1F': b => ({ runtime: b[0] * 256 + b[1] }),
+  '2F': b => ({ fuel: b[0] * 100 / 255 }),
+  '33': b => ({ baro: b[0] }),
+  '42': b => ({ ecuv: (b[0] * 256 + b[1]) / 1000 }),
+  '46': b => ({ ambient: b[0] - 40 }),
+  '5C': b => ({ oiltemp: b[0] - 40 }),
+};
+function decode(pid, b) {
+  if (!b || !b.length) return null;
+  if (DEC[pid]) return DEC[pid](b);
+  const p = parseInt(pid, 16);
+  if (p >= 0x14 && p <= 0x1B) { const n = obd.o2map[pid]; return { [n + '_v']: b[0] / 200, [n + '_trim']: b[1] === 255 ? null : (b[1] - 128) * 100 / 128 }; }
+  if (p >= 0x24 && p <= 0x2B) { const n = obd.o2map[pid]; return { [n + '_lambda']: (b[0] * 256 + b[1]) * 2 / 65536 }; }
+  return null;
+}
+
+/* Narrowband O2 (E39 M5 uses Bosch narrowband pre-cat sensors) -> rough AFR.
+   A narrowband only tells rich vs lean around stoich, so this is an estimate. */
+function nbAfr(v) { return 14.7 - Math.tanh((v - 0.45) / 0.16) * 1.15; }
+
+/* =====================================================================
+   Connection lifecycle
+   ===================================================================== */
+function setStatus(text, cls) {
+  $('statusText').textContent = text;
+  $('status').className = 'pill ' + (cls || '');
+}
+function setConnectedUI(on) {
+  $('btnConnect').disabled = on; $('btnDemo').disabled = on; $('btnDisconnect').disabled = !on;
+}
+
+async function initElm() {
+  setStatus('Initializing adapter…', 'busy');
+  try { await cmd('ATZ', 5000); } catch (e) { log('in', 'ATZ timed out (normal on some clones) — continuing'); }
+  await sleep(300);
+  for (const c of ['ATE0', 'ATL0', 'ATS0', 'ATH0', 'ATAT1', 'ATSP0']) { try { await cmd(c, 2000); } catch (e) { log('er', c + ': ' + e.message); } }
+  try { const id = await cmd('ATI', 2000); log('in', 'Adapter: ' + id.join(' ')); } catch {}
+  setStatus('Searching for car protocol (can take ~10s on K-line)…', 'busy');
+  const first = await cmd('0100', 20000);
+  const flat = first.join(' ');
+  if (/UNABLE TO CONNECT|BUS INIT:.*ERROR|NO DATA/i.test(flat) && !/41\s*00/.test(flat.replace(/\s/g, ''))) {
+    throw new Error('Adapter is alive but the car did not answer. Turn the key to position 2 (dash lights on) or start the engine, then reconnect.');
+  }
+  const dpn = (await cmd('ATDPN', 2000))[0] || '';
+  obd.protocol = dpn.replace(/^A/i, '').toUpperCase();
+  obd.isCAN = ['6', '7', '8', '9', 'A', 'B', 'C'].includes(obd.protocol);
+  log('in', `Protocol: ${PROTOCOLS[obd.protocol] || dpn}`);
+  setStatus('Reading supported sensors…', 'busy');
+  await detectSupported();
+  log('in', `Supported Mode 01 PIDs: ${[...obd.supported].sort().join(' ')}`);
+  $('sProto').textContent = PROTOCOLS[obd.protocol] || obd.protocol || '—';
+  markSupport();
+}
+
+async function start(adapter) {
+  obd.adapter = adapter; obd.fails = {};
+  adapter.onDisconnect = () => { log('er', 'Bluetooth link dropped'); stopAll('Disconnected (link lost)', 'err'); };
+  setConnectedUI(true);
+  try {
+    if (adapter.open) { setStatus('Choose your Veepeak in the browser popup…', 'busy'); await adapter.open(); }
+    await initElm();
+    obd.connected = true;
+    setStatus(`Connected · ${adapter.name} · ${PROTOCOLS[obd.protocol] || 'OBD-II'}`, 'on');
+    pollLoop();
+    scanCodes().catch(e => log('er', e.message));
+  } catch (e) {
+    log('er', e.message || String(e));
+    const msg = e.name === 'NotFoundError' ? 'No device chosen' : (e.message || 'Connection failed');
+    stopAll(msg, 'err');
+  }
+}
+
+function stopAll(text = 'Disconnected', cls = '') {
+  obd.connected = false; polling = false;
+  try { obd.adapter && obd.adapter.close(); } catch {}
+  obd.adapter = null;
+  setConnectedUI(false);
+  setStatus(text, cls);
+}
+
+/* =====================================================================
+   Live polling — RPM + speed every cycle, everything else rotates.
+   On the M5's K-line bus expect ~6–10 requests/sec total.
+   ===================================================================== */
+let polling = false;
+const live = {};
+const hist = {};
+const HIST_N = 160;
+let reqCount = 0, reqT0 = performance.now(), cycle = 0;
+
+function pushHist(k, v) { if (v == null || isNaN(v)) return; (hist[k] ||= []).push(v); if (hist[k].length > HIST_N) hist[k].shift(); }
+
+async function pollLoop() {
+  polling = true;
+  const FAST = ['0C', '0D'];
+  let slowIdx = 0;
+  while (polling && obd.connected) {
+    const slowAll = ['11', '05', '04', '0E', '10', '14', '18', '06', '08', '0F', '15', '19', '07', '09', '03', '24', '28', '2F', '42', '46', '33', '0B', '1F', '5C']
+      .filter(p => obd.supported.has(p) && (obd.fails[p] || 0) < 4);
+    const batch = FAST.filter(p => obd.supported.has(p) || !obd.supported.size);
+    if (slowAll.length) { batch.push(slowAll[slowIdx++ % slowAll.length]); batch.push(slowAll[slowIdx++ % slowAll.length]); }
+    for (const pid of batch) {
+      if (!polling) break;
+      try {
+        const b = await readPid('01', pid);
+        reqCount++;
+        const v = decode(pid, b);
+        if (v) { Object.assign(live, v); obd.fails[pid] = 0; } else obd.fails[pid] = (obd.fails[pid] || 0) + 1;
+      } catch (e) {
+        log('er', e.message);
+        if (!obd.connected) return;
+        await sleep(200);
+      }
+    }
+    if (++cycle % 12 === 0 && polling) {
+      try { const r = await cmd('ATRV', 1500); const m = /([\d.]+)\s*V/i.exec(r.join(' ')); if (m) live.batt = parseFloat(m[1]); } catch {}
+    }
+    derive();
+    recordRow();
+    const dt = (performance.now() - reqT0) / 1000;
+    if (dt > 2) { $('rate').textContent = `${(reqCount / dt).toFixed(1)} requests/s · ${PROTOCOLS[obd.protocol] || ''}`; reqCount = 0; reqT0 = performance.now(); }
+  }
+}
+
+function derive() {
+  for (const bank of [1, 2]) {
+    const s = `B${bank}S1`;
+    let afr = null, src = null;
+    if (live[s + '_lambda'] != null) { afr = live[s + '_lambda'] * 14.7; src = 'wideband'; }
+    else if (live[s + '_v'] != null) { afr = nbAfr(live[s + '_v']); src = 'NB est.'; }
+    if (afr != null) {
+      const k = 'afr' + bank;
+      live[k + '_raw'] = afr;
+      live[k] = live[k] == null ? afr : live[k] * 0.75 + afr * 0.25; // smooth the narrowband switching
+      live[k + '_src'] = src;
+    }
+  }
+  for (const k of ['rpm', 'speed', 'coolant', 'iat', 'load', 'throttle', 'timing', 'maf', 'stft1', 'ltft1', 'stft2', 'ltft2',
+    'afr1', 'afr2', 'B1S1_v', 'B2S1_v', 'B1S2_v', 'B2S2_v', 'batt', 'ecuv', 'fuel', 'ambient', 'baro', 'oiltemp', 'map']) pushHist(k, live[k]);
+}
+
+/* =====================================================================
+   Units
+   ===================================================================== */
+const U = {
+  speed: v => settings.units === 'us' ? v / 1.609344 : v,
+  speedUnit: () => settings.units === 'us' ? 'MPH' : 'KM/H',
+  temp: v => settings.units === 'us' ? v * 9 / 5 + 32 : v,
+  tempUnit: () => settings.units === 'us' ? '°F' : '°C',
+};
+
+/* =====================================================================
+   E39 M5-style gauges (SVG)
+   Black faces, chrome bezels, red-orange needles, white numerals
+   (amber with "night lighting"), 8k tach with the M5's variable
+   warm-up LEDs, speedo with km/h inner ring.
+   ===================================================================== */
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+const rad = d => d * Math.PI / 180;
+const pt = (cx, cy, r, deg) => [cx + r * Math.sin(rad(deg)), cy - r * Math.cos(rad(deg))];
+function arc(cx, cy, r, a0, a1) { const [x0, y0] = pt(cx, cy, r, a0), [x1, y1] = pt(cx, cy, r, a1); return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`; }
+
+function buildDial(svg, cfg) {
+  svg.innerHTML = '';
+  const id = svg.id, cx = 200, cy = 200, A0 = -130, A1 = 130;
+  const ang = v => A0 + (clamp(v, cfg.min, cfg.max) - cfg.min) / (cfg.max - cfg.min) * (A1 - A0);
+  const defs = el('defs', {}, svg);
+  const chrome = el('linearGradient', { id: id + 'chr', x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+  [['0', '#f4f5f6'], ['.35', '#8d9196'], ['.55', '#2a2d31'], ['.8', '#9aa0a6'], ['1', '#e6e8ea']].forEach(([o, c]) => el('stop', { offset: o, 'stop-color': c }, chrome));
+  const face = el('radialGradient', { id: id + 'face', cx: '.5', cy: '.42', r: '.6' }, defs);
+  el('stop', { offset: '0', 'stop-color': '#1d1f22' }, face); el('stop', { offset: '1', 'stop-color': '#050506' }, face);
+  const hub = el('radialGradient', { id: id + 'hub', cx: '.4', cy: '.35', r: '.7' }, defs);
+  el('stop', { offset: '0', 'stop-color': '#4a4d52' }, hub); el('stop', { offset: '1', 'stop-color': '#0c0c0d' }, hub);
+  const glow = el('filter', { id: id + 'glow', x: '-50%', y: '-50%', width: '200%', height: '200%' }, defs);
+  el('feGaussianBlur', { stdDeviation: '2.2', result: 'b' }, glow);
+  const fm = el('feMerge', {}, glow); el('feMergeNode', { in: 'b' }, fm); el('feMergeNode', { in: 'SourceGraphic' }, fm);
+
+  el('circle', { cx, cy, r: 197, fill: `url(#${id}chr)` }, svg);
+  el('circle', { cx, cy, r: 189, fill: '#0b0b0c' }, svg);
+  el('circle', { cx, cy, r: 186, fill: `url(#${id}face)` }, svg);
+
+  // red zone
+  if (cfg.red) el('path', { d: arc(cx, cy, 166, ang(cfg.red[0]), ang(cfg.red[1])), stroke: '#d81e12', 'stroke-width': 10, fill: 'none' }, svg);
+
+  // warm-up LEDs (tach)
+  const leds = [];
+  if (cfg.leds) {
+    for (let r = cfg.leds.from; r < cfg.leds.to; r += cfg.leds.step) {
+      const p = el('path', { d: arc(cx, cy, 166, ang(r) + 0.9, ang(r + cfg.leds.step) - 0.9), stroke: 'var(--led-off)', 'stroke-width': 10, fill: 'none', class: 'led' }, svg);
+      leds.push({ rpm: r, p });
+    }
+  }
+
+  // ticks
+  for (let v = cfg.min; v <= cfg.max + 1e-6; v += cfg.minor) {
+    const isMajor = Math.abs((v - cfg.min) / cfg.major - Math.round((v - cfg.min) / cfg.major)) < 1e-6;
+    const a = ang(v); const [x0, y0] = pt(cx, cy, isMajor ? 150 : 158, a); const [x1, y1] = pt(cx, cy, 174, a);
+    el('line', { x1: x0, y1: y0, x2: x1, y2: y1, class: 'ink-stroke glow', 'stroke-width': isMajor ? 4 : 2, 'stroke-linecap': 'butt' }, svg);
+    if (isMajor && (cfg.labelSkip ? !cfg.labelSkip(v) : true)) {
+      const [lx, ly] = pt(cx, cy, 128, a);
+      el('text', { x: lx, y: ly, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'ink glow', 'font-size': cfg.labelSize || 26, 'font-weight': 500 }, svg).textContent = cfg.label(v);
+    }
+  }
+  // inner secondary scale (km/h ring on the mph speedo)
+  if (cfg.inner) {
+    for (const v of cfg.inner.values) {
+      const a = ang(cfg.inner.map(v)); const [x0, y0] = pt(cx, cy, 145, a); const [x1, y1] = pt(cx, cy, 140, a);
+      el('line', { x1: x0, y1: y0, x2: x1, y2: y1, class: 'ink-stroke', 'stroke-width': 1.5, opacity: .6 }, svg);
+      const [lx, ly] = pt(cx, cy, 98, a);
+      el('text', { x: lx, y: ly, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'ink-dim', 'font-size': 12 }, svg).textContent = v;
+    }
+  }
+  // face labels
+  if (cfg.logo) {
+    const g = el('g', { transform: 'translate(200 112)' }, svg);
+    [['#1c69d4', -20], ['#2b2c7c', -12], ['#e2231a', -4]].forEach(([c, x]) => el('polygon', { points: `${x},-10 ${x + 7},-10 ${x + 1},10 ${x - 6},10`, fill: c }, g));
+    el('text', { x: 6, y: 9, 'font-size': 26, 'font-weight': 900, 'font-style': 'italic', class: 'ink' }, g).textContent = 'M';
+  }
+  (cfg.faceText || []).forEach(t => el('text', { x: 200, y: t.y, 'text-anchor': 'middle', class: t.dim ? 'ink-dim' : 'ink', 'font-size': t.size || 13, 'letter-spacing': '1' }, svg).textContent = t.text);
+
+  // sub-gauge (bottom)
+  let subNeedle = null, subAng = null;
+  if (cfg.sub) {
+    const s = cfg.sub, scx = 200, scy = 300, R = 44, B0 = -62, B1 = 62;
+    subAng = v => B0 + (clamp(v, s.min, s.max) - s.min) / (s.max - s.min) * (B1 - B0);
+    for (let i = 0; i <= 4; i++) {
+      const a = B0 + i * (B1 - B0) / 4; const [x0, y0] = pt(scx, scy, R - (i % 2 ? 4 : 8), a); const [x1, y1] = pt(scx, scy, R + 2, a);
+      el('line', { x1: x0, y1: y0, x2: x1, y2: y1, class: 'ink-stroke', 'stroke-width': i % 2 ? 1.5 : 3 }, svg);
+    }
+    if (s.redFrom != null) el('path', { d: arc(scx, scy, R + 6, subAng(s.redFrom), B1), stroke: '#d81e12', 'stroke-width': 4, fill: 'none' }, svg);
+    const [lx0, ly0] = pt(scx, scy, R + 16, B0); const [lx1, ly1] = pt(scx, scy, R + 16, B1);
+    el('text', { x: lx0, y: ly0, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'ink', 'font-size': 13, 'font-weight': 600 }, svg).textContent = s.lo;
+    el('text', { x: lx1, y: ly1, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'ink', 'font-size': 13, 'font-weight': 600 }, svg).textContent = s.hi;
+    el('text', { x: scx, y: scy + 22, 'text-anchor': 'middle', class: 'ink-dim', 'font-size': 10, 'letter-spacing': '1.5' }, svg).textContent = s.name;
+    subNeedle = el('g', {}, svg);
+    el('polygon', { points: `${scx - 1.5},${scy - R + 2} ${scx + 1.5},${scy - R + 2} ${scx + 3},${scy} ${scx - 3},${scy}`, fill: 'var(--needle)', filter: `url(#${id}glow)` }, subNeedle);
+    el('circle', { cx: scx, cy: scy, r: 7, fill: `url(#${id}hub)` }, svg);
+  }
+
+  // main needle
+  const needle = el('g', {}, svg);
+  el('polygon', { points: `198.6,36 201.4,36 204.5,226 195.5,226`, fill: 'var(--needle)', filter: `url(#${id}glow)` }, needle);
+  el('circle', { cx, cy, r: 19, fill: `url(#${id}hub)`, stroke: '#000', 'stroke-width': 1 }, svg);
+  el('circle', { cx, cy, r: 5, fill: '#1a1b1d' }, svg);
+
+  const state = { main: cfg.min, mainT: cfg.min, sub: cfg.sub ? cfg.sub.min : 0, subT: cfg.sub ? cfg.sub.min : 0, subValid: false };
+  return {
+    cfg, leds, state,
+    setTarget(v) { state.mainT = v; },
+    setSub(v) { state.subValid = v != null; if (v != null) state.subT = v; },
+    frame(dt) {
+      const k = Math.min(1, dt * 9);
+      state.main += (state.mainT - state.main) * k;
+      needle.setAttribute('transform', `rotate(${ang(state.main).toFixed(2)} ${cx} ${cy})`);
+      if (subNeedle) {
+        state.sub += ((state.subValid ? state.subT : cfg.sub.min) - state.sub) * Math.min(1, dt * 3);
+        subNeedle.setAttribute('transform', `rotate(${subAng(state.sub).toFixed(2)} 200 300)`);
+        subNeedle.style.opacity = state.subValid ? 1 : .25;
+      }
+    },
+  };
+}
+
+let speedo, tach;
+function buildGauges() {
+  const us = settings.units === 'us';
+  speedo = buildDial($('speedo'), us ? {
+    min: 0, max: 170, major: 20, minor: 10, label: v => v, labelSize: 25,
+    inner: { values: [40, 80, 120, 160, 200, 240], map: k => k / 1.609344 },
+    faceText: [{ y: 150, text: 'MPH', size: 14 }, { y: 255, text: 'km/h', size: 10, dim: true }],
+    sub: { min: 0, max: 100, lo: 'E', hi: 'F', name: 'FUEL', redFrom: null },
+  } : {
+    min: 0, max: 300, major: 20, minor: 10, label: v => v, labelSize: 19, labelSkip: v => v % 40 !== 0,
+    faceText: [{ y: 150, text: 'km/h', size: 14 }],
+    sub: { min: 0, max: 100, lo: 'E', hi: 'F', name: 'FUEL', redFrom: null },
+  });
+  tach = buildDial($('tach'), {
+    min: 0, max: 8000, major: 1000, minor: 250, label: v => v / 1000, labelSize: 30,
+    red: [7000, 8000], leds: { from: 4000, to: 7000, step: 250 }, logo: true,
+    faceText: [{ y: 150, text: '1/min x1000', size: 11, dim: true }],
+    sub: { min: 50, max: 130, lo: 'C', hi: 'H', name: 'COOLANT', redFrom: 115 },
+  });
+}
+
+/* M5 variable warm-up redline: the real car uses oil temp; OBD-II on the
+   E39 doesn't expose oil temp, so coolant is used as the proxy. */
+function updateLeds() {
+  const c = live.coolant;
+  const thr = c == null ? 4000 : 4000 + clamp((c - 40) / 45, 0, 1) * 3000;
+  for (const l of tach.leds) l.p.setAttribute('stroke', l.rpm + 250 > thr ? (l.rpm >= 6500 ? '#ff5a1a' : 'var(--led-on)') : 'var(--led-off)');
+}
+
+/* =====================================================================
+   Tiles
+   ===================================================================== */
+const fmt = (v, d = 0) => v == null || isNaN(v) ? '--' : v.toFixed(d);
+const TILES = [
+  // group, key, label, pids(for support), value fn, unit fn, decimals, note fn, status fn
+  { g: 'tilesAfr', key: 'afr1', label: 'AFR · Bank 1', pids: ['14', '24'], afr: true },
+  { g: 'tilesAfr', key: 'afr2', label: 'AFR · Bank 2', pids: ['18', '28', '16'], afr: true },
+  { g: 'tilesAfr', key: 'stft1', label: 'Short trim B1', pids: ['06'], unit: '%', d: 1, st: v => Math.abs(v) > 15 ? 'bad' : Math.abs(v) > 10 ? 'warn' : '' },
+  { g: 'tilesAfr', key: 'ltft1', label: 'Long trim B1', pids: ['07'], unit: '%', d: 1, st: v => Math.abs(v) > 15 ? 'bad' : Math.abs(v) > 8 ? 'warn' : '', note: v => v > 8 ? 'adding fuel → lean condition' : v < -8 ? 'pulling fuel → rich condition' : 'healthy' },
+  { g: 'tilesAfr', key: 'stft2', label: 'Short trim B2', pids: ['08'], unit: '%', d: 1, st: v => Math.abs(v) > 15 ? 'bad' : Math.abs(v) > 10 ? 'warn' : '' },
+  { g: 'tilesAfr', key: 'ltft2', label: 'Long trim B2', pids: ['09'], unit: '%', d: 1, st: v => Math.abs(v) > 15 ? 'bad' : Math.abs(v) > 8 ? 'warn' : '', note: v => v > 8 ? 'adding fuel → lean condition' : v < -8 ? 'pulling fuel → rich condition' : 'healthy' },
+  { g: 'tilesAfr', key: 'B1S1_v', label: 'O2 B1 pre-cat', pids: ['14'], unit: 'V', d: 3, note: v => v > 0.55 ? 'rich' : v < 0.35 ? 'lean' : 'stoich' },
+  { g: 'tilesAfr', key: 'B2S1_v', label: 'O2 B2 pre-cat', pids: ['18', '16'], unit: 'V', d: 3, note: v => v > 0.55 ? 'rich' : v < 0.35 ? 'lean' : 'stoich' },
+  { g: 'tilesAfr', key: 'B1S2_v', label: 'O2 B1 post-cat', pids: ['15'], unit: 'V', d: 3, note: () => 'steady ≈ healthy cat' },
+  { g: 'tilesAfr', key: 'B2S2_v', label: 'O2 B2 post-cat', pids: ['19', '17'], unit: 'V', d: 3, note: () => 'steady ≈ healthy cat' },
+
+  { g: 'tilesEngine', key: 'rpm', label: 'Engine speed', pids: ['0C'], unit: 'rpm', d: 0 },
+  { g: 'tilesEngine', key: 'speed', label: 'Road speed', pids: ['0D'], conv: 'speed', d: 0 },
+  { g: 'tilesEngine', key: 'throttle', label: 'Throttle', pids: ['11'], unit: '%', d: 0 },
+  { g: 'tilesEngine', key: 'load', label: 'Calc. load', pids: ['04'], unit: '%', d: 0 },
+  { g: 'tilesEngine', key: 'timing', label: 'Ignition timing', pids: ['0E'], unit: '° BTDC', d: 1 },
+  { g: 'tilesEngine', key: 'maf', label: 'Mass air flow', pids: ['10'], unit: 'g/s', d: 1, note: v => `≈ ${(v * 0.0476 * 1.06).toFixed(0)} hp-equiv. airflow` },
+  { g: 'tilesEngine', key: 'map', label: 'Manifold pressure', pids: ['0B'], unit: 'kPa', d: 0 },
+  { g: 'tilesEngine', key: 'runtime', label: 'Run time', pids: ['1F'], unit: 's', d: 0 },
+
+  { g: 'tilesTemp', key: 'coolant', label: 'Coolant', pids: ['05'], conv: 'temp', d: 0, st: v => v > 112 ? 'bad' : v > 105 ? 'warn' : '' },
+  { g: 'tilesTemp', key: 'iat', label: 'Intake air', pids: ['0F'], conv: 'temp', d: 0 },
+  { g: 'tilesTemp', key: 'oiltemp', label: 'Oil temp', pids: ['5C'], conv: 'temp', d: 0 },
+  { g: 'tilesTemp', key: 'ambient', label: 'Ambient', pids: ['46'], conv: 'temp', d: 0 },
+  { g: 'tilesTemp', key: 'batt', label: 'Battery (at port)', pids: ['ATRV'], unit: 'V', d: 1, st: v => v < 12.2 ? 'bad' : v < 13.2 && (live.rpm || 0) > 500 ? 'warn' : '', note: v => (live.rpm || 0) > 500 ? (v >= 13.5 ? 'charging OK' : 'low for running engine') : 'engine off' },
+  { g: 'tilesTemp', key: 'ecuv', label: 'DME supply', pids: ['42'], unit: 'V', d: 2 },
+  { g: 'tilesTemp', key: 'fuel', label: 'Fuel level', pids: ['2F'], unit: '%', d: 0 },
+  { g: 'tilesTemp', key: 'baro', label: 'Barometric', pids: ['33'], unit: 'kPa', d: 0 },
+];
+const tileEls = {};
+function buildTiles() {
+  for (const t of TILES) {
+    const d = document.createElement('div'); d.className = 'tile';
+    d.innerHTML = `<div class="lbl"><span>${t.label}</span><span class="src"></span></div>
+      <div class="val"><span class="v">--</span><small class="u"></small></div>
+      ${t.afr ? '<div class="afrbar"><i style="left:50%"></i></div><div class="afrscale"><span>11 rich</span><span>14.7</span><span>lean 18</span></div>' : ''}
+      <div class="note"></div><canvas width="300" height="60"></canvas>`;
+    $(t.g).appendChild(d);
+    tileEls[t.key] = { t, d, v: d.querySelector('.v'), u: d.querySelector('.u'), note: d.querySelector('.note'), src: d.querySelector('.src'),
+      bar: d.querySelector('.afrbar i'), cv: d.querySelector('canvas') };
+  }
+}
+function markSupport() {
+  for (const k in tileEls) {
+    const { t, d } = tileEls[k];
+    const sup = t.pids.includes('ATRV') || !obd.supported.size || t.pids.some(p => obd.supported.has(p));
+    d.classList.toggle('ns', !sup);
+    if (!sup) tileEls[k].note.textContent = 'not reported by this DME';
+  }
+}
+function spark(cv, arr, color) {
+  const ctx = cv.getContext('2d'); const w = cv.width, h = cv.height;
+  ctx.clearRect(0, 0, w, h);
+  if (!arr || arr.length < 2) return;
+  let mn = Math.min(...arr), mx = Math.max(...arr); if (mx - mn < 1e-6) { mx += 1; mn -= 1; }
+  ctx.beginPath();
+  arr.forEach((v, i) => { const x = i / (HIST_N - 1) * w; const y = h - 4 - (v - mn) / (mx - mn) * (h - 8); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.stroke();
+}
+function renderTiles() {
+  const sparkColor = settings.night ? '#ff8c1a' : '#4f9cff';
+  for (const k in tileEls) {
+    const { t, d, v, u, note, src, bar, cv } = tileEls[k];
+    if (d.classList.contains('ns')) continue;
+    let val = live[k];
+    let shown = val, unit = t.unit || '';
+    if (t.conv === 'temp') { shown = val == null ? null : U.temp(val); unit = U.tempUnit(); }
+    if (t.conv === 'speed') { shown = val == null ? null : U.speed(val); unit = U.speedUnit().toLowerCase(); }
+    if (t.afr) { unit = ':1'; src.textContent = live[k + '_src'] || ''; }
+    v.textContent = fmt(shown, t.afr ? 1 : t.d);
+    u.textContent = unit;
+    d.classList.remove('warn', 'bad');
+    if (val != null && t.st) { const s = t.st(val); if (s) d.classList.add(s); }
+    if (val != null && t.note) note.textContent = t.note(val);
+    if (t.afr && val != null) {
+      bar.style.left = clamp((val - 11) / 7 * 100, 0, 100) + '%';
+      const raw = live[k + '_raw'];
+      note.textContent = live[k + '_src'] === 'wideband' ? 'wideband λ ' + (val / 14.7).toFixed(3) : `raw ${fmt(raw, 1)} · narrowband switches ±; trims show the truth`;
+    }
+    const hk = t.conv === 'temp' ? null : k;
+    const arr = hist[k]; if (arr) spark(cv, t.conv === 'temp' ? arr.map(U.temp) : t.conv === 'speed' ? arr.map(U.speed) : arr, sparkColor);
+  }
+}
+
+/* =====================================================================
+   Center LCD + lamps
+   ===================================================================== */
+const FUELSYS = { 1: 'OPEN · cold', 2: 'CLOSED LOOP', 4: 'OPEN · load/decel', 8: 'OPEN · fault', 16: 'CLOSED · fault' };
+let milOn = false;
+function renderCenter() {
+  $('lcdSpeed').textContent = live.speed == null ? '0' : Math.round(U.speed(live.speed));
+  $('lcdSpeedUnit').textContent = U.speedUnit();
+  $('lcdRpm').textContent = live.rpm == null ? '0' : Math.round(live.rpm / 10) * 10;
+  $('lcdCoolant').textContent = live.coolant == null ? '--' : Math.round(U.temp(live.coolant)) + U.tempUnit();
+  $('lcdIat').textContent = live.iat == null ? '--' : Math.round(U.temp(live.iat)) + U.tempUnit();
+  $('lcdAfr').textContent = `${fmt(live.afr1, 1)} / ${fmt(live.afr2, 1)}`;
+  $('lcdBatt').textContent = live.batt == null ? '--' : live.batt.toFixed(1) + ' V';
+  $('lcdFuelSys').textContent = live.fuelsys == null ? '--' : (FUELSYS[live.fuelsys] || ('0x' + hex2(live.fuelsys)));
+  $('lampMil').classList.toggle('on', milOn);
+  $('lampTemp').classList.toggle('on', (live.coolant || 0) > 112);
+  $('lampBatt').classList.toggle('on', live.batt != null && (live.rpm || 0) > 500 && live.batt < 13.0);
+  $('lampCL').classList.toggle('on', live.fuelsys === 2);
+}
+
+/* =====================================================================
+   Animation loop
+   ===================================================================== */
+let lastFrame = performance.now(), lastSlow = 0;
+function frame(now) {
+  const dt = (now - lastFrame) / 1000; lastFrame = now;
+  if (speedo && tach) {
+    speedo.setTarget(live.speed == null ? 0 : U.speed(live.speed));
+    speedo.setSub(obd.supported.has('2F') ? live.fuel : null);
+    tach.setTarget(live.rpm || 0);
+    tach.setSub(live.coolant);
+    speedo.frame(dt); tach.frame(dt);
+  }
+  if (now - lastSlow > 200) { lastSlow = now; renderCenter(); if (tach) updateLeds(); if ($('tab-dash').classList.contains('active')) renderTiles(); }
+  requestAnimationFrame(frame);
+}
+
+/* =====================================================================
+   Trouble codes
+   ===================================================================== */
+const DTC_DB = {
+  P0100: 'Mass air flow (MAF) circuit malfunction', P0101: 'MAF sensor range/performance', P0102: 'MAF circuit low input', P0103: 'MAF circuit high input',
+  P0110: 'Intake air temp circuit malfunction', P0115: 'Coolant temp circuit malfunction', P0116: 'Coolant temp sensor range/performance',
+  P0120: 'Throttle position sensor circuit', P0125: 'Coolant temp too low for closed-loop fuel control', P0128: 'Coolant below thermostat regulating temperature',
+  P0130: 'O2 sensor circuit (Bank 1 Sensor 1)', P0133: 'O2 sensor slow response (B1S1)', P0134: 'O2 sensor no activity (B1S1)', P0135: 'O2 heater circuit (B1S1)',
+  P0136: 'O2 sensor circuit (B1S2)', P0141: 'O2 heater circuit (B1S2)', P0150: 'O2 sensor circuit (B2S1)', P0153: 'O2 sensor slow response (B2S1)',
+  P0154: 'O2 sensor no activity (B2S1)', P0155: 'O2 heater circuit (B2S1)', P0156: 'O2 sensor circuit (B2S2)', P0161: 'O2 heater circuit (B2S2)',
+  P0171: 'System too lean (Bank 1)', P0172: 'System too rich (Bank 1)', P0174: 'System too lean (Bank 2)', P0175: 'System too rich (Bank 2)',
+  P0300: 'Random/multiple cylinder misfire', P0301: 'Cylinder 1 misfire', P0302: 'Cylinder 2 misfire', P0303: 'Cylinder 3 misfire', P0304: 'Cylinder 4 misfire',
+  P0305: 'Cylinder 5 misfire', P0306: 'Cylinder 6 misfire', P0307: 'Cylinder 7 misfire', P0308: 'Cylinder 8 misfire',
+  P0335: 'Crankshaft position sensor circuit', P0340: 'Camshaft position sensor circuit',
+  P0410: 'Secondary air injection system malfunction', P0411: 'Secondary air injection incorrect flow',
+  P0420: 'Catalyst efficiency below threshold (Bank 1)', P0430: 'Catalyst efficiency below threshold (Bank 2)',
+  P0440: 'EVAP system malfunction', P0441: 'EVAP incorrect purge flow', P0442: 'EVAP small leak detected', P0455: 'EVAP large leak detected', P0456: 'EVAP very small leak detected',
+  P0500: 'Vehicle speed sensor malfunction', P0505: 'Idle control system malfunction', P0506: 'Idle RPM lower than expected', P0507: 'Idle RPM higher than expected',
+  P0600: 'Serial communication link malfunction', P0601: 'Control module memory checksum error',
+};
+const S62_HINTS = {
+  P0171: 'S62 usual suspects: cracked intake/throttle-body boots, vacuum leaks, dirty/failing MAF (two on S62), crankcase vent hoses, fuel pressure. Compare LTFT B1 vs B2 on the dashboard.',
+  P0174: 'If both banks are lean together, look for something shared: MAF readings, fuel pressure, or a big vacuum leak. One bank only → that bank’s boots/injectors.',
+  P0300: 'S62: check coils (common failure), plugs, and swap coils between cylinders to see if the misfire follows.',
+  P0410: 'Secondary air pump/check valves are a common E39 M5 fault, especially after a cold start.',
+  P0411: 'Secondary air flow — pump, valves, or carbon in the SAI ports.',
+  P0420: 'Rule out lean codes/misfires first; compare post-cat O2 — a steady post-cat voltage means the cat is working.',
+  P0430: 'Rule out lean codes/misfires first; compare post-cat O2 — a steady post-cat voltage means the cat is working.',
+  P0442: 'Gas cap seal is the first thing to check; then EVAP hoses / leak detection pump.',
+  P0455: 'Gas cap not tightened / missing is the most common cause.',
+};
+function describeDtc(code) {
+  if (DTC_DB[code]) return DTC_DB[code];
+  if (/^P0[3][0-9]{2}$/.test(code) && /^P030[1-8]$/.test(code)) return DTC_DB[code];
+  if (/^P1/.test(code)) return 'BMW manufacturer-specific code — needs BMW (DS2/INPA) description';
+  if (/^P3/.test(code)) return 'Manufacturer-specific powertrain code';
+  return 'Generic OBD-II code (not in the built-in list)';
+}
+function decodeDtc(h) {
+  const n = parseInt(h, 16); if (!n) return null;
+  return 'PCBU'[n >> 14] + ((n >> 12) & 3) + h.slice(1).toUpperCase();
+}
+async function readDtcs(mode) {
+  const respHead = hex2(parseInt(mode, 16) + 0x40);
+  const lines = await cmd(mode, 6000);
+  const codes = [];
+  if (lines.some(l => ERR_RE.test(l.replace(/\s/g, '')) && !l.replace(/\s/g, '').startsWith(respHead))) return codes;
+  if (obd.isCAN) {
+    let data = lines.map(l => l.replace(/\s/g, '').toUpperCase()).filter(l => !/^[0-9A-F]{3}$/.test(l)).map(l => l.replace(/^[0-9A-F]:/, '')).join('');
+    const i = data.indexOf(respHead); if (i < 0) return codes;
+    data = data.slice(i + 2);
+    const count = parseInt(data.slice(0, 2), 16); data = data.slice(2);
+    for (let k = 0; k < count && k * 4 + 4 <= data.length; k++) { const c = decodeDtc(data.slice(k * 4, k * 4 + 4)); if (c) codes.push(c); }
+  } else {
+    for (let l of lines) {
+      l = l.replace(/\s/g, '').toUpperCase();
+      if (!l.startsWith(respHead)) continue;
+      const body = l.slice(2);
+      for (let k = 0; k + 4 <= body.length; k += 4) { const c = decodeDtc(body.slice(k, k + 4)); if (c && !codes.includes(c)) codes.push(c); }
+    }
+  }
+  return codes;
+}
+
+const READY = {
+  cont: [['Misfire', 0], ['Fuel system', 1], ['Comprehensive components', 2]],
+  noncont: [['Catalyst', 0], ['Heated catalyst', 1], ['EVAP system', 2], ['Secondary air', 3], ['A/C refrigerant', 4], ['O2 sensors', 5], ['O2 sensor heaters', 6], ['EGR', 7]],
+};
+function renderReadiness(b) {
+  if (!b || b.length < 4) { $('readyOut').innerHTML = '<div class="empty">Readiness not reported.</div>'; return; }
+  const [, B, C, D] = b;
+  const rows = [];
+  for (const [n, bit] of READY.cont) { const avail = B & (1 << bit), inc = B & (1 << (bit + 4)); rows.push([n, avail ? (inc ? 'inc' : 'ok') : 'na']); }
+  for (const [n, bit] of READY.noncont) { const avail = C & (1 << bit), inc = D & (1 << bit); rows.push([n, avail ? (inc ? 'inc' : 'ok') : 'na']); }
+  const label = { ok: 'Complete', inc: 'Incomplete', na: 'Not tested' };
+  $('readyOut').innerHTML = `<table><tr><th>Monitor</th><th>Status</th></tr>${rows.map(([n, s]) => `<tr><td>${n}</td><td><span class="tag ${s}">${label[s]}</span></td></tr>`).join('')}</table>`;
+}
+function renderDtcList(target, codes, pending) {
+  if (!codes.length) { $(target).innerHTML = `<div class="empty">${pending ? 'No pending codes.' : 'No stored codes. ✓'}</div>`; return; }
+  $(target).innerHTML = codes.map(c => {
+    const q = encodeURIComponent(`E39 M5 S62 ${c}`);
+    return `<div class="dtc"><span class="code ${pending ? 'pending' : ''}">${c}</span>
+      <div><div class="desc">${describeDtc(c)}</div>${S62_HINTS[c] ? `<div class="hint">${S62_HINTS[c]}</div>` : ''}</div>
+      <a href="https://www.google.com/search?q=${q}" target="_blank" rel="noopener">Look up ↗</a></div>`;
+  }).join('');
+}
+
+let busy = false;
+function requireConn() { if (!obd.connected) { alert('Connect to the car (or start Demo mode) first.'); return false; } return true; }
+function setCodeButtons(dis) { ['btnScan', 'btnFreeze', 'btnClear'].forEach(id => $(id).disabled = dis); }
+
+let lastScan = null;
+async function scanCodes() {
+  if (!requireConn() || busy) return;
+  busy = true; setCodeButtons(true); $('scanInfo').textContent = 'Scanning…';
+  try {
+    const st = await readPid('01', '01');
+    if (st) {
+      milOn = !!(st[0] & 0x80);
+      $('sMil').textContent = milOn ? 'ON' : 'Off'; $('sMil').style.color = milOn ? 'var(--warn)' : 'var(--ok)';
+      $('sCount').textContent = st[0] & 0x7f;
+    }
+    renderReadiness(st);
+    const stored = await readDtcs('03');
+    const pending = await readDtcs('07');
+    renderDtcList('storedList', stored, false);
+    renderDtcList('pendingList', pending, true);
+    $('sPending').textContent = pending.length;
+    const badge = $('codeBadge'); badge.hidden = !stored.length; badge.textContent = stored.length;
+    const when = new Date();
+    $('scanInfo').textContent = `Last scan ${when.toLocaleTimeString()}`;
+    lastScan = { when: when.toISOString(), stored, pending, mil: milOn };
+    addHistory(`Scan: ${stored.length ? stored.join(', ') : 'no stored codes'}${pending.length ? ` · pending ${pending.join(', ')}` : ''} · MIL ${milOn ? 'ON' : 'off'}`);
+  } catch (e) { log('er', e.message); $('scanInfo').textContent = 'Scan failed — see Console'; }
+  finally { busy = false; setCodeButtons(false); }
+}
+
+const FF_PIDS = ['0C', '0D', '05', '04', '06', '07', '08', '09', '0F', '11', '0E', '03', '10'];
+async function readFreeze(silent) {
+  if (!requireConn()) return null;
+  if (!silent) { if (busy) return null; busy = true; setCodeButtons(true); }
+  try {
+    const trig = await readPid('02', '02', '00');
+    if (!trig || !(trig[0] || trig[1])) { $('freezeOut').innerHTML = '<div class="empty">No freeze frame stored.</div>'; return null; }
+    const ff = { dtc: decodeDtc(hex2(trig[0]) + hex2(trig[1])) };
+    for (const p of FF_PIDS) { if (obd.supported.size && !obd.supported.has(p)) continue; const b = await readPid('02', p, '00'); const v = decode(p, b); if (v) Object.assign(ff, v); }
+    const rows = [
+      ['Triggered by', ff.dtc], ['RPM', fmt(ff.rpm)], ['Speed', ff.speed == null ? '--' : `${fmt(U.speed(ff.speed))} ${U.speedUnit().toLowerCase()}`],
+      ['Coolant', ff.coolant == null ? '--' : fmt(U.temp(ff.coolant)) + U.tempUnit()], ['Intake air', ff.iat == null ? '--' : fmt(U.temp(ff.iat)) + U.tempUnit()],
+      ['Load', fmt(ff.load) + ' %'], ['Throttle', fmt(ff.throttle) + ' %'], ['Fuel system', ff.fuelsys == null ? '--' : FUELSYS[ff.fuelsys] || ff.fuelsys],
+      ['STFT / LTFT B1', `${fmt(ff.stft1, 1)} / ${fmt(ff.ltft1, 1)} %`], ['STFT / LTFT B2', `${fmt(ff.stft2, 1)} / ${fmt(ff.ltft2, 1)} %`],
+    ];
+    $('freezeOut').innerHTML = `<table>${rows.map(([a, b]) => `<tr><td style="color:var(--muted)">${a}</td><td><b>${b}</b></td></tr>`).join('')}</table>`;
+    addHistory('Freeze frame: ' + rows.map(([a, b]) => `${a} ${b}`).join(' · '));
+    return ff;
+  } catch (e) { log('er', e.message); return null; }
+  finally { if (!silent) { busy = false; setCodeButtons(false); } }
+}
+
+async function clearCodes() {
+  if (!requireConn() || busy) return;
+  const dlg = $('clearDlg');
+  const ok = await new Promise(res => {
+    $('dlgOk').onclick = () => { dlg.close(); res(true); };
+    $('dlgCancel').onclick = () => { dlg.close(); res(false); };
+    dlg.oncancel = () => res(false);
+    dlg.showModal();
+  });
+  if (!ok) return;
+  busy = true; setCodeButtons(true);
+  try {
+    $('scanInfo').textContent = 'Saving freeze frame…';
+    await readFreeze(true);
+    $('scanInfo').textContent = 'Clearing…';
+    const r = (await cmd('04', 8000)).join(' ').replace(/\s/g, '');
+    if (/^44/.test(r) || r.includes('44')) { log('in', 'DME accepted clear (44)'); addHistory('Codes cleared (Mode 04)'); }
+    else { addHistory('Clear rejected: ' + r); alert('The DME did not confirm the clear (response: ' + r + '). Try ignition ON with the engine OFF.'); }
+  } catch (e) { log('er', e.message); }
+  busy = false; setCodeButtons(false);
+  $('scanInfo').textContent = 'Re-scanning…';
+  await sleep(1500);
+  await scanCodes();
+}
+
+let history = loadJSON('obd.history', []);
+function addHistory(text) {
+  history.unshift({ t: new Date().toISOString(), text }); history = history.slice(0, 100); saveJSON('obd.history', history); renderHistory();
+}
+function renderHistory() {
+  $('histOut').innerHTML = history.length ? history.map(h => `<div><b style="color:var(--text)">${new Date(h.t).toLocaleString()}</b><br>${h.text.replace(/</g, '&lt;')}</div>`).join('') : '<div class="empty">No scans yet.</div>';
+}
+
+/* =====================================================================
+   CSV recording
+   ===================================================================== */
+let recording = false, rec = [];
+const REC_KEYS = ['rpm', 'speed', 'throttle', 'load', 'timing', 'maf', 'coolant', 'iat', 'stft1', 'ltft1', 'stft2', 'ltft2', 'B1S1_v', 'B2S1_v', 'B1S2_v', 'B2S2_v', 'afr1', 'afr2', 'fuelsys', 'batt'];
+function recordRow() { if (recording) rec.push([new Date().toISOString(), ...REC_KEYS.map(k => live[k] == null ? '' : +(+live[k]).toFixed(3))]); }
+function exportCsv() {
+  const csv = ['time,' + REC_KEYS.join(','), ...rec.map(r => r.join(','))].join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = `m5-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`; a.click();
+}
+
+/* =====================================================================
+   Wire up UI
+   ===================================================================== */
+document.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav.tabs button').forEach(x => x.classList.toggle('active', x === b));
+  document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('active', s.id === 'tab-' + b.dataset.tab));
+});
+$('btnConnect').onclick = () => start(new BleElm());
+$('btnDemo').onclick = () => start(new SimElm());
+$('btnDisconnect').onclick = () => { log('in', 'Disconnected by user'); stopAll(); };
+$('btnScan').onclick = scanCodes;
+$('btnFreeze').onclick = () => readFreeze(false);
+$('btnClear').onclick = clearCodes;
+function applySettings() {
+  document.body.classList.toggle('night', settings.night);
+  $('btnUnits').textContent = settings.units === 'us' ? 'Units: US (mph · °F)' : 'Units: Metric (km/h · °C)';
+  $('btnNight').textContent = 'Night lighting: ' + (settings.night ? 'on' : 'off');
+}
+$('btnUnits').onclick = () => { settings.units = settings.units === 'us' ? 'metric' : 'us'; saveJSON('obd.settings', settings); applySettings(); buildGauges(); };
+$('btnNight').onclick = () => { settings.night = !settings.night; saveJSON('obd.settings', settings); applySettings(); };
+$('btnRecord').onclick = () => {
+  recording = !recording;
+  if (recording) rec = [];
+  $('btnRecord').textContent = recording ? '■ Stop recording' : '● Record log';
+  $('btnRecord').classList.toggle('danger', recording);
+  $('btnExport').disabled = recording || !rec.length;
+};
+$('btnExport').onclick = exportCsv;
+async function sendManual() {
+  const v = $('cmdInput').value.trim().toUpperCase(); if (!v) return;
+  if (!obd.adapter) { log('er', 'Not connected'); return; }
+  if (v === '04' && !confirm('04 clears all trouble codes. Send it?')) return;
+  $('cmdInput').value = '';
+  try { const r = await cmd(v, 6000); if (obd.adapter instanceof SimElm) {} else if (!r.length) log('rx', '(no response)'); } catch (e) { log('er', e.message); }
+}
+$('btnSend').onclick = sendManual;
+$('cmdInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendManual(); });
+$('btnClearLog').onclick = () => logEl.innerHTML = '';
+
+// Environment checks
+(function envCheck() {
+  const w = $('btWarn');
+  if (!window.isSecureContext) {
+    w.hidden = false; w.innerHTML = '⚠ This page must be opened from <b>http://localhost</b> or <b>https://</b> for Bluetooth to work. Use <b>Start Dashboard.bat</b> in this folder. Demo mode still works.';
+  } else if (!navigator.bluetooth) {
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    w.hidden = false; w.innerHTML = ios
+      ? '⚠ Safari/Chrome on iPhone can’t talk to Bluetooth devices. Install the free <b>Bluefy – Web BLE Browser</b> from the App Store and open this same page in it. Demo mode still works here.'
+      : '⚠ This browser has no Web Bluetooth. Use <b>Chrome</b> or <b>Edge</b> on Windows / Android / Mac (on iPhone use the <b>Bluefy</b> browser). Demo mode still works.';
+    $('btnConnect').disabled = true;
+  }
+})();
+
+applySettings();
+buildGauges();
+buildTiles();
+renderHistory();
+log('in', 'Ready. Plug the Veepeak into the OBD port, ignition to position 2, then press Connect.');
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
