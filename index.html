@@ -480,8 +480,10 @@ class BleElm {
   send(cmd, timeout = 3000) {
     const run = () => new Promise((resolve, reject) => {
       this.buf = '';
+      log('tx', cmd);
       const t = setTimeout(() => { this.pending = null; reject(new Error('timeout waiting for ' + cmd)); }, timeout);
-      this.pending = { resolve, reject, t };
+      const done = (out) => { log('rx', out.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean).join(' | ') || '(empty)'); resolve(out); };
+      this.pending = { resolve: done, reject, t };
       this.write(cmd + '\r').catch(e => { clearTimeout(t); this.pending = null; reject(e); });
     });
     const p = this.chain.then(run, run);
@@ -501,7 +503,8 @@ class SimElm {
     this.t0 = performance.now(); this.last = this.t0;
     this.s = { speed: 0, rpm: 780, gear: 1, thr: 0, coolant: 28, o2phase: 0 };
     this.stored = ['0171', '0174']; this.pending = ['0302']; this.cleared = false;
-    this.supported = ['01','03','04','05','06','07','08','09','0C','0D','0E','0F','10','11','13','14','15','18','19','1C','20','21','2F','33','40','42','46'];
+    // Matches what Jake's real 2002 M5 (MSS52 DME) reports.
+    this.supported = ['01','03','04','05','06','07','08','09','0C','0D','0E','0F','10','11','13','14','15','18','19','1C'];
     this.freeze = null;
   }
   step() {
@@ -553,7 +556,8 @@ class SimElm {
     log('tx', cmd);
     await sleep(35 + Math.random() * 45);
     this.step();
-    const c = cmd.toUpperCase().replace(/\s+/g, '');
+    let c = cmd.toUpperCase().replace(/\s+/g, '');
+    if (/^01[0-9A-F]{2}1$/.test(c)) c = c.slice(0, 4); // response-count hint
     let r;
     if (c === 'ATZ') r = 'ELM327 v1.5';
     else if (c === 'ATI') r = 'ELM327 v1.5';
@@ -602,21 +606,38 @@ class SimElm {
 const PROTOCOLS = { '1': 'SAE J1850 PWM', '2': 'SAE J1850 VPW', '3': 'ISO 9141-2', '4': 'ISO 14230 KWP (5-baud)', '5': 'ISO 14230 KWP (fast)',
   '6': 'CAN 11-bit 500k', '7': 'CAN 29-bit 500k', '8': 'CAN 11-bit 250k', '9': 'CAN 29-bit 250k', 'A': 'SAE J1939', 'B': 'User CAN 1', 'C': 'User CAN 2' };
 
-const obd = { adapter: null, connected: false, protocol: null, isCAN: false, supported: new Set(), o2map: {}, fails: {} };
+const obd = { adapter: null, connected: false, protocol: null, isCAN: false, supported: new Set(), o2map: {}, fails: {}, fastSuffix: '' };
 
+/* Time a few RPM reads with and without the response-count hint and keep the faster
+   one, but only if the adapter answers it correctly (some clones don't). */
+async function tuneSpeed() {
+  const timeIt = async (suffix) => {
+    obd.fastSuffix = suffix; let ok = 0; const t0 = performance.now();
+    for (let i = 0; i < 4; i++) { const b = await readPid('01', '0C'); if (b && b.length >= 2) ok++; }
+    return { ok, ms: (performance.now() - t0) / 4 };
+  };
+  try {
+    const plain = await timeIt('');
+    const fast = await timeIt('1');
+    obd.fastSuffix = fast.ok === 4 && fast.ms < plain.ms * 0.9 ? '1' : '';
+    log('in', `Speed test: ${plain.ms.toFixed(0)} ms/read normal, ${fast.ms.toFixed(0)} ms/read fast (${fast.ok}/4 ok) → using ${obd.fastSuffix ? 'fast' : 'normal'} mode`);
+  } catch (e) { obd.fastSuffix = ''; log('er', 'Speed test failed: ' + errText(e)); }
+}
+
+/* Logging happens inside each adapter's send() so the console shows requests and
+   replies in the order they actually hit the bus. */
 async function cmd(c, timeout) {
-  if (!(obd.adapter instanceof SimElm)) log('tx', c);
   const raw = await obd.adapter.send(c, timeout);
-  const lines = raw.split(/[\r\n]+/).map(s => s.trim()).filter(s => s && s !== c && !/^SEARCHING/i.test(s) && !/^BUS INIT/i.test(s));
-  if (!(obd.adapter instanceof SimElm)) log('rx', lines.join(' | ') || '(empty)');
-  return lines;
+  return raw.split(/[\r\n]+/).map(s => s.trim()).filter(s => s && s !== c && !/^SEARCHING/i.test(s) && !/^BUS INIT/i.test(s));
 }
 const ERR_RE = /^(NO DATA|UNABLE TO CONNECT|CAN ERROR|BUS ERROR|BUFFER FULL|STOPPED|ERROR|\?|FB ERROR|DATA ERROR|ACT ALERT|LV RESET)/i;
 
 /* Request a Mode 01/02 PID; returns data bytes after the header, or null */
 async function readPid(mode, pid, frame = '') {
   const want = hex2(parseInt(mode, 16) + 0x40) + pid;
-  const lines = await cmd(mode + pid + frame);
+  // fastSuffix "1" tells the ELM to return after the first ECU reply instead of
+  // waiting out the bus timeout — a big speed-up on the M5's slow K-line.
+  const lines = await cmd(mode + pid + frame + (mode === '01' ? obd.fastSuffix : ''));
   for (let ln of lines) {
     ln = ln.replace(/\s+/g, '').replace(/^\d:/, '').toUpperCase();
     if (ERR_RE.test(ln)) return null;
@@ -702,7 +723,8 @@ async function initElm() {
   setStatus('Initializing adapter…', 'busy');
   try { await cmd('ATZ', 5000); } catch (e) { log('in', 'ATZ timed out (normal on some clones) — continuing'); }
   await sleep(300);
-  for (const c of ['ATE0', 'ATL0', 'ATS0', 'ATH0', 'ATAT1', 'ATSP0']) { try { await cmd(c, 2000); } catch (e) { log('er', c + ': ' + e.message); } }
+  obd.fastSuffix = '';
+  for (const c of ['ATE0', 'ATL0', 'ATS0', 'ATH0', 'ATAT2', 'ATSP0']) { try { await cmd(c, 2000); } catch (e) { log('er', c + ': ' + e.message); } }
   try { const id = await cmd('ATI', 2000); log('in', 'Adapter: ' + id.join(' ')); } catch {}
   setStatus('Searching for car protocol (can take ~10s on K-line)…', 'busy');
   const first = await cmd('0100', 20000);
@@ -719,6 +741,7 @@ async function initElm() {
   log('in', `Supported Mode 01 PIDs: ${[...obd.supported].sort().join(' ')}`);
   $('sProto').textContent = PROTOCOLS[obd.protocol] || obd.protocol || '—';
   markSupport();
+  if (obd.supported.has('0C')) { setStatus('Tuning update speed…', 'busy'); await tuneSpeed(); }
 }
 
 async function start(adapter) {
@@ -769,7 +792,8 @@ async function pollLoop() {
     const slowAll = ['11', '05', '04', '0E', '10', '14', '18', '06', '08', '0F', '15', '19', '07', '09', '03', '24', '28', '2F', '42', '46', '33', '0B', '1F', '5C']
       .filter(p => obd.supported.has(p) && (obd.fails[p] || 0) < 4);
     const batch = FAST.filter(p => obd.supported.has(p) || !obd.supported.size);
-    if (slowAll.length) { batch.push(slowAll[slowIdx++ % slowAll.length]); batch.push(slowAll[slowIdx++ % slowAll.length]); }
+    // One slower sensor per cycle keeps RPM/speed as fresh as the K-line allows.
+    if (slowAll.length) batch.push(slowAll[slowIdx++ % slowAll.length]);
     for (const pid of batch) {
       if (!polling) break;
       try {
@@ -900,6 +924,7 @@ function buildDial(svg, cfg) {
       el('line', { x1: x0, y1: y0, x2: x1, y2: y1, class: 'ink-stroke', 'stroke-width': i % 2 ? 1.5 : 3 }, svg);
     }
     if (s.redFrom != null) el('path', { d: arc(scx, scy, R + 6, subAng(s.redFrom), B1), stroke: '#d81e12', 'stroke-width': 4, fill: 'none' }, svg);
+    if (s.redTo != null) el('path', { d: arc(scx, scy, R + 6, B0, subAng(s.redTo)), stroke: '#d81e12', 'stroke-width': 4, fill: 'none' }, svg);
     const [lx0, ly0] = pt(scx, scy, R + 16, B0); const [lx1, ly1] = pt(scx, scy, R + 16, B1);
     el('text', { x: lx0, y: ly0, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'ink', 'font-size': 13, 'font-weight': 600 }, svg).textContent = s.lo;
     el('text', { x: lx1, y: ly1, 'text-anchor': 'middle', 'dominant-baseline': 'central', class: 'ink', 'font-size': 13, 'font-weight': 600 }, svg).textContent = s.hi;
@@ -934,17 +959,24 @@ function buildDial(svg, cfg) {
 }
 
 let speedo, tach;
+/* The E39 DME doesn't report fuel level over OBD, so once we know that, the speedo's
+   small gauge becomes a charging-voltage gauge instead of a dead fuel needle. */
+let speedoSubIsVolts = false;
 function buildGauges() {
   const us = settings.units === 'us';
+  speedoSubIsVolts = obd.supported.size > 0 && !obd.supported.has('2F');
+  const sub = speedoSubIsVolts
+    ? { min: 10, max: 16, lo: '10', hi: '16', name: 'VOLTS', redTo: 12.5 }
+    : { min: 0, max: 100, lo: 'E', hi: 'F', name: 'FUEL', redFrom: null };
   speedo = buildDial($('speedo'), us ? {
     min: 0, max: 170, major: 20, minor: 10, label: v => v, labelSize: 25,
     inner: { values: [40, 80, 120, 160, 200, 240], map: k => k / 1.609344 },
     faceText: [{ y: 150, text: 'MPH', size: 14 }, { y: 255, text: 'km/h', size: 10, dim: true }],
-    sub: { min: 0, max: 100, lo: 'E', hi: 'F', name: 'FUEL', redFrom: null },
+    sub,
   } : {
     min: 0, max: 300, major: 20, minor: 10, label: v => v, labelSize: 19, labelSkip: v => v % 40 !== 0,
     faceText: [{ y: 150, text: 'km/h', size: 14 }],
-    sub: { min: 0, max: 100, lo: 'E', hi: 'F', name: 'FUEL', redFrom: null },
+    sub,
   });
   tach = buildDial($('tach'), {
     min: 0, max: 8000, major: 1000, minor: 250, label: v => v / 1000, labelSize: 30,
@@ -1015,8 +1047,9 @@ function markSupport() {
     const { t, d } = tileEls[k];
     const sup = t.pids.includes('ATRV') || !obd.supported.size || t.pids.some(p => obd.supported.has(p));
     d.classList.toggle('ns', !sup);
-    if (!sup) tileEls[k].note.textContent = 'not reported by this DME';
+    d.hidden = !sup; // hide sensors this DME doesn't report
   }
+  buildGauges(); // swaps the speedo's fuel gauge for volts if fuel level isn't reported
 }
 function spark(cv, arr, color) {
   const ctx = cv.getContext('2d'); const w = cv.width, h = cv.height;
@@ -1080,7 +1113,7 @@ function frame(now) {
   const dt = (now - lastFrame) / 1000; lastFrame = now;
   if (speedo && tach) {
     speedo.setTarget(live.speed == null ? 0 : U.speed(live.speed));
-    speedo.setSub(obd.supported.has('2F') ? live.fuel : null);
+    speedo.setSub(speedoSubIsVolts ? live.batt : obd.supported.has('2F') ? live.fuel : null);
     tach.setTarget(live.rpm || 0);
     tach.setSub(live.coolant);
     speedo.frame(dt); tach.frame(dt);
@@ -1110,6 +1143,7 @@ const DTC_DB = {
   P0600: 'Serial communication link malfunction', P0601: 'Control module memory checksum error',
 };
 const S62_HINTS = {
+  P0128: 'Engine took too long to reach temperature or cooled off while driving. Usually a thermostat stuck partly open; sometimes the coolant temp sensor. Watch Coolant on a highway drive: if it sinks well below ~190°F at cruise, it’s the thermostat.',
   P0171: 'S62 usual suspects: cracked intake/throttle-body boots, vacuum leaks, dirty/failing MAF (two on S62), crankcase vent hoses, fuel pressure. Compare LTFT B1 vs B2 on the dashboard.',
   P0174: 'If both banks are lean together, look for something shared: MAF readings, fuel pressure, or a big vacuum leak. One bank only → that bank’s boots/injectors.',
   P0300: 'S62: check coils (common failure), plugs, and swap coils between cylinders to see if the misfire follows.',
